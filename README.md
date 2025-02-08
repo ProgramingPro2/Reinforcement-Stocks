@@ -26,5 +26,5 @@ A fully featured trading bot that uses reinforcement learning–inspired paramet
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/yourusername/your-repo.git
-   cd your-repo
+   git clone https://github.com/ProgramingPro2/Reinforcement-Stocks.git
+   cd Reinforcement-Stocks
