@@ -54,3 +54,46 @@ A fully featured trading bot that uses reinforcement learning–inspired paramet
    ```shell
    python main.py --debug
    ```
+   
+## Configuration
+
+   Environment Variables:
+   Create a .env file in the project root and add your Alpaca API credentials:
+   ```.env
+   ALPACA_KEY=your_api_key_here
+   ALPACA_SECRET=your_api_secret_here
+   ENDPOINT=https://paper-api.alpaca.markets
+   ```
+   Adjust the ORDER_AMOUNT (dollar amount per trade) and other strategy parameters in the source code as needed.
+
+## Watchlist
+Create a stocks.json file in the working directory containing a list of stock tickers. For example:
+
+   ```json
+    ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
+   ```
+
+## Usage
+
+Run the trading bot with the debug flag (optional):
+
+```shell
+python main.py --debug
+```
+
+When you run the script, it will:
+
+    Retrieve near real-time historical data via yfinance.
+    Compute composite signals based on RSI, MACD, and SMA.
+    Execute trades on Alpaca’s paper trading endpoint (ensure your API credentials are set).
+    Automatically adjust strategy parameters over time.
+    Launch a flask dashboard you can access http://0.0.0.0:5000.
+
+
+## Disclaimer
+
+This project is for educational purposes only. Trading involves risk, and you should always perform thorough testing using paper trading before using any strategy with real capital. The author is not responsible for any losses incurred.
+
+## Contributing
+
+Contributions, issues, and feature requests are welcome! Please check the issues page for open problems or to suggest enhancements.
