@@ -25,6 +25,32 @@ A fully featured trading bot that uses reinforcement learning–inspired paramet
 
 1. **Clone the repository:**
 
-   ```bash
+   ```
    git clone https://github.com/ProgramingPro2/Reinforcement-Stocks.git
    cd Reinforcement-Stocks
+   ```
+   
+2. **Create a virtual environment and install packages:**
+
+   Linux:
+   ```shell
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install alpaca_trade_api pandas numpy flask python-dotenv yfinance
+   ```
+   Windows (Not Tested):
+   ```bash
+   python3 -m venv venv
+   venv\Scripts\activate
+   pip install alpaca_trade_api pandas numpy flask python-dotenv yfinance
+   ```
+
+3. **Start script:**
+   
+   ```shell
+   python main.py
+   ```
+   or in debug mode:
+   ```shell
+   python main.py --debug
+   ```
