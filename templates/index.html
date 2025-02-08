@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trading Bot Dashboard</title>
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    /* Global Styles */
+    body {
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+    /* Light and Dark Mode Backgrounds */
+    body.light-mode {
+      background-color: #f8f9fa;
+      color: #212529;
+    }
+    body.dark-mode {
+      background-color: #121212;
+      color: #e0e0e0;
+    }
+    /* Rounded corners and shadows for cards */
+    .card {
+      border-radius: 0.75rem;
+      box-shadow: 0 0.25rem 0.5rem rgba(0,0,0,0.15);
+      margin-bottom: 1.5rem;
+    }
+    /* Table styling */
+    .table-responsive {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .table th, .table td {
+      vertical-align: middle;
+    }
+    .table thead th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    /* Scrollbar styling for WebKit (optional) */
+    .table-responsive::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    .table-responsive::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .table-responsive::-webkit-scrollbar-thumb {
+      background-color: rgba(0, 0, 0, 0.2);
+      border-radius: 4px;
+    }
+    /* Toggle switch customization */
+    .form-check.form-switch .form-check-input {
+      width: 3em;
+      height: 1.5em;
+    }
+  </style>
+</head>
+<body class="dark-mode">
+  <!-- Navigation Bar with Dark Mode Toggle -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark rounded-bottom">
+    <div class="container-fluid">
+      <a class="navbar-brand" href="#">Trading Bot Dashboard</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" 
+              data-bs-target="#navbarContent" aria-controls="navbarContent" 
+              aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse justify-content-end" id="navbarContent">
+        <div class="form-check form-switch text-light">
+          <input class="form-check-input" type="checkbox" id="darkModeToggle" onchange="toggleDarkMode()">
+          <label class="form-check-label" for="darkModeToggle">Dark Mode</label>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container my-4">
+    <!-- Countdown Timer -->
+    <div id="countdown" class="text-center mb-4 fs-5"></div>
+    
+    <!-- Strategy Parameters Card -->
+    <div class="card">
+      <div class="card-header bg-secondary text-white">
+        <h5 class="mb-0">Current Strategy Parameters</h5>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-bordered mb-0">
+            <thead class="table-dark">
+              <tr>
+                <th>Parameter</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for key, value in params.items() %}
+              <tr>
+                <td>{{ key }}</td>
+                <td>{{ value }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Latest Signals Card -->
+    <div class="card">
+      <div class="card-header bg-secondary text-white">
+        <h5 class="mb-0">Latest Signals</h5>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-bordered mb-0">
+            <thead class="table-dark">
+              <tr>
+                <th>Symbol</th>
+                <th>RSI</th>
+                <th>MACD</th>
+                <th>SMA</th>
+                <th>Composite</th>
+                <th>Signal</th>
+                <th>Timestamp</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for symbol, info in signals.items() %}
+              <tr>
+                <td>{{ symbol }}</td>
+                <td>{{ info['RSI'] if info['RSI'] is not none else 'N/A' }}</td>
+                <td>{{ info['MACD'] if info['MACD'] is not none else 'N/A' }}</td>
+                <td>{{ info['SMA'] if info['SMA'] is not none else 'N/A' }}</td>
+                <td>{{ info['composite'] if info['composite'] is not none else 'N/A' }}</td>
+                <td>{{ info['signal'] }}</td>
+                <td>{{ info['timestamp'] }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Trades Card -->
+    <div class="card">
+      <div class="card-header bg-secondary text-white">
+        <h5 class="mb-0">Recent Trades</h5>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-bordered mb-0">
+            <thead class="table-dark">
+              <tr>
+                <th>Timestamp</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Quantity</th>
+                <th>Price</th>
+                <th>PnL</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for trade in trade_log %}
+              <tr>
+                <td>{{ trade.timestamp }}</td>
+                <td>{{ trade.symbol }}</td>
+                <td>{{ trade.side }}</td>
+                <td>{{ trade.qty }}</td>
+                <td>{{ trade.price }}</td>
+                <td>{{ trade.pnl }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bootstrap 5 JS Bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // Countdown refresh logic
+    var countdownSeconds = {{ check_interval }};
+    function startCountdown() {
+      var countdownElement = document.getElementById("countdown");
+      var interval = setInterval(function(){
+        if(countdownSeconds <= 0){
+          clearInterval(interval);
+          window.location.reload();
+        } else {
+          countdownElement.innerHTML = "Refreshing in " + countdownSeconds + " seconds...";
+          countdownSeconds--;
+        }
+      }, 1000);
+    }
+
+    // Toggle dark/light mode and save preference in localStorage
+    function toggleDarkMode() {
+      if(document.body.classList.contains('dark-mode')) {
+        document.body.classList.remove('dark-mode');
+        document.body.classList.add('light-mode');
+        localStorage.setItem('theme', 'light');
+      } else {
+        document.body.classList.remove('light-mode');
+        document.body.classList.add('dark-mode');
+        localStorage.setItem('theme', 'dark');
+      }
+    }
+
+    window.onload = function() {
+      // Retrieve saved theme from localStorage (default to dark if none saved)
+      const savedTheme = localStorage.getItem('theme') || 'dark';
+      if(savedTheme === 'light') {
+        document.body.classList.remove('dark-mode');
+        document.body.classList.add('light-mode');
+        document.getElementById('darkModeToggle').checked = false;
+      } else {
+        document.body.classList.remove('light-mode');
+        document.body.classList.add('dark-mode');
+        document.getElementById('darkModeToggle').checked = true;
+      }
+      startCountdown();
+    };
+  </script>
+</body>
+</html>
