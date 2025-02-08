@@ -21,6 +21,7 @@ Before running:
         ALPACA_SECRET=your_api_secret_here
         ENDPOINT=https://paper-api.alpaca.markets
   - Make a file called "stocks.json" with a list of stock tickers in the watchlist
+  - Set ORDER_AMOUNT to the dollar amount you want to trade per trade
   - Use Alpaca's paper trading endpoint for testing.
   - This example uses Python 3.11+.
 """
@@ -90,20 +91,11 @@ default_params = {
 strategy_params = default_params.copy()
 params_lock = threading.Lock()  # Protect access to strategy_params
 
-rl_epsilon = 0.2    # 20% chance for a random parameter adjustment
+working_dir = os.path.dirname(os.path.realpath(__file__))
 
-# Load watchlist
-STOCK_FILE = "stocks.json"
-if os.path.exists(STOCK_FILE):
-    with open(STOCK_FILE, "r") as f:
-        try:
-            data = json.load(f)
-            WATCHLIST = data
-        except json.JSONDecodeError:
-            logging.error("Error loading JSON, initializing empty watchlist.")
-            WATCHLIST = []
-else:
-    WATCHLIST = []
+print(f"Working directory: {working_dir}")
+
+rl_epsilon = 0.2    # 20% chance for a random parameter adjustment
 
 DATA_TIMEFRAME = '1d'
 HIST_DAYS = 100          # Number of historical days used for indicator calculations
@@ -117,7 +109,9 @@ trade_log_lock = threading.Lock()
 latest_signals = {}
 signals_lock = threading.Lock()
 
-DATA_FILE = "data.json"
+WATCHLIST_FILE = working_dir + "/watchlist.json"
+
+DATA_FILE = working_dir + "/data.json"
 
 DEFAULT_CANDIDATE_POOL = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "FB", "NVDA", "JPM", "V", "JNJ",
@@ -126,7 +120,17 @@ DEFAULT_CANDIDATE_POOL = [
     "ABBV", "ACN", "AVGO", "QCOM", "TXN", "COST", "NEE", "NKE", "MRK", "WFC",
     "LLY", "MDT", "MCD", "PM", "ORCL", "BA", "IBM", "HON", "AMGN"
 ]
-STOCK_FILE = "stocks.json"
+STOCK_FILE = working_dir + "/stocks.json"
+if os.path.exists(STOCK_FILE):
+    with open(STOCK_FILE, "r") as f:
+        try:
+            data = json.load(f)
+            WATCHLIST = data
+        except json.JSONDecodeError:
+            logging.error("Error loading JSON, initializing empty watchlist.")
+            WATCHLIST = []
+else:
+    WATCHLIST = []
 if os.path.exists(STOCK_FILE):
     with open(STOCK_FILE, "r") as f:
         try:
@@ -518,7 +522,6 @@ def update_watchlist(api: tradeapi.REST):
         if score is None:
             score = compute_composite_signal(symbol, api)
         watchlist_scores.append((symbol, score))
-    # Sort descending (best composite signal first)
     watchlist_scores.sort(key=lambda x: x[1], reverse=True)
     new_watchlist = [symbol for symbol, score in watchlist_scores][:100]
 
