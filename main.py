@@ -604,7 +604,7 @@ def dashboard():
                            params=current_params,
                            signals=current_signals,
                            trade_log=trades,
-                           check_interval=CHECK_INTERVAL) 
+                           check_interval=CHECK_INTERVAL)
 
 @app.route('/api/status')
 def api_status():
