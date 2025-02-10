@@ -9,7 +9,7 @@ This script:
   - Trades via Alpaca's API based on the composite signal but only during US market hours.
   - Records trade performance and automatically tunes parameters over time using a true
     reinforcement learning approach (via Q-learning).
-  - At market close, it “discovers” stocks by retaining only
+  - At market close, it "discovers" stocks by retaining only
     the best (up to 100 total) while removing the worst-performers.
   - Launches a Flask web portal so you can view the current settings, trade log, and asset signals.
 
