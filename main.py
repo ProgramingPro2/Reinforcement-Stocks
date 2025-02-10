@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Fully Featured Trading Bot using Reinforcement Learning, a Web Dashboard,
+Fully Featured Trading Bot using True Reinforcement Learning, a Web Dashboard,
 market-hour stopping, and end-of-day watchlist discovery.
 
 This script:
-  - Uses yfinance  to scan a watchlist for trading opportunities based on a composite
+  - Uses yfinance to scan a watchlist for trading opportunities based on a composite
     of RSI, MACD, and SMA.
   - Trades via Alpaca's API based on the composite signal but only during US market hours.
-  - Records trade performance and automatically tunes parameters over time using a simple
-    reinforcement learning approach.
-  - At market close, it â€œdiscoversâ€ stocks by retaining only
+  - Records trade performance and automatically tunes parameters over time using a true
+    reinforcement learning approach (via Q-learning).
+  - At market close, it “discovers” stocks by retaining only
     the best (up to 100 total) while removing the worst-performers.
   - Launches a Flask web portal so you can view the current settings, trade log, and asset signals.
 
@@ -95,8 +95,6 @@ working_dir = os.path.dirname(os.path.realpath(__file__))
 
 print(f"Working directory: {working_dir}")
 
-rl_epsilon = 0.2    # 20% chance for a random parameter adjustment
-
 DATA_TIMEFRAME = '1d'
 HIST_DAYS = 100          # Number of historical days used for indicator calculations
 CHECK_INTERVAL = 60 * 5  # Check every 5 minutes
@@ -110,7 +108,6 @@ latest_signals = {}
 signals_lock = threading.Lock()
 
 WATCHLIST_FILE = working_dir + "/watchlist.json"
-
 DATA_FILE = working_dir + "/data.json"
 
 DEFAULT_CANDIDATE_POOL = [
@@ -259,7 +256,7 @@ def calculate_order_quantity(price: float, order_amount: float) -> int:
     return qty
 
 # ==============================
-# Market Hours Helper
+# MARKET HOURS HELPER
 # ==============================
 
 def is_market_open() -> bool:
@@ -276,7 +273,7 @@ def is_market_open() -> bool:
     return open_status
 
 # ==============================
-# Compute composite signal for a symbol.
+# COMPUTE COMPOSITE SIGNAL FOR A SYMBOL
 # ==============================
 
 def compute_composite_signal(symbol: str, api: tradeapi.REST) -> float:
@@ -336,7 +333,6 @@ def scan_and_trade(api: tradeapi.REST):
             logging.debug(f"Skipping {symbol} (no valid data).")
             continue
 
-        # Convert the 'close' column value into a scalar float.
         close_prices = bars['close']
         current_price = float(close_prices.iloc[-1].squeeze())
         with params_lock:
@@ -418,6 +414,11 @@ def scan_and_trade(api: tradeapi.REST):
             }
 
 def record_trade(symbol: str, side: str, qty: int, price: float):
+    """
+    Records a trade. For a buy, the trade is recorded and the open position stored.
+    For a sell, if a matching open position exists, compute PnL and update the cumulative reward.
+    """
+    global cumulative_reward
     with trade_log_lock:
         trade_entry = {
             'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -425,8 +426,19 @@ def record_trade(symbol: str, side: str, qty: int, price: float):
             'side': side,
             'qty': qty,
             'price': price,
-            'pnl': 0.0  # In a production system, compute PnL appropriately.
+            'pnl': 0.0
         }
+        if side == 'buy':
+            open_positions_rl[symbol] = (price, qty)
+        elif side == 'sell':
+            if symbol in open_positions_rl:
+                buy_price, buy_qty = open_positions_rl[symbol]
+                pnl = (price - buy_price) * qty
+                trade_entry['pnl'] = pnl
+                cumulative_reward += pnl
+                del open_positions_rl[symbol]
+            else:
+                trade_entry['pnl'] = 0.0
         trade_log.append(trade_entry)
         logging.debug(f"Recorded trade: {trade_entry}")
 
@@ -452,53 +464,140 @@ def update_held_positions(api: tradeapi.REST):
         logging.error(f"Error updating held positions: {e}")
 
 # ==============================
-# PARAMETER TUNING LOGIC (RL-Style)
+# TRUE REINFORCEMENT LEARNING AGENT FOR PARAMETER TUNING
 # ==============================
 
-def tune_parameters():
-    global strategy_params, rl_epsilon
-    with trade_log_lock:
-        if not trade_log:
-            logging.debug("No trades to base tuning on. Skipping parameter tuning.")
-            return
-        buys = sum(1 for t in trade_log if t['side'] == 'buy')
-        sells = sum(1 for t in trade_log if t['side'] == 'sell')
+# Global variables for RL-based parameter tuning.
+# cumulative_reward tracks the total realized PnL from closed trades.
+cumulative_reward = 0.0
+open_positions_rl = {}  # For matching buys and sells for RL reward calculation.
+previous_cumulative_reward = 0.0  # Used to compute reward over tuning intervals.
+previous_state = 0  # State can be -1, 0, or 1 representing performance trend.
+
+NUM_ACTIONS = 11  # Define number of discrete actions.
+
+class ParameterTuningAgent:
+    def __init__(self, alpha=0.1, gamma=0.9, epsilon=0.2):
+        self.alpha = alpha      # Learning rate
+        self.gamma = gamma      # Discount factor
+        self.epsilon = epsilon  # Exploration rate
+        self.q_table = {}       # Q-table mapping state -> list of Q-values for each action
+
+    def get_q_values(self, state):
+        if state not in self.q_table:
+            self.q_table[state] = [0.0 for _ in range(NUM_ACTIONS)]
+        return self.q_table[state]
+
+    def choose_action(self, state):
+        q_values = self.get_q_values(state)
+        if random.random() < self.epsilon:
+            action = random.randint(0, NUM_ACTIONS - 1)
+            logging.debug(f"RL Agent: Randomly chosen action {action} for state {state}")
+            return action
+        else:
+            max_q = max(q_values)
+            candidates = [i for i, q in enumerate(q_values) if q == max_q]
+            action = random.choice(candidates)
+            logging.debug(f"RL Agent: Chosen best action {action} for state {state} with Q-values {q_values}")
+            return action
+
+    def update(self, state, action, reward, next_state):
+        q_values = self.get_q_values(state)
+        next_q_values = self.get_q_values(next_state)
+        best_next = max(next_q_values)
+        td_target = reward + self.gamma * best_next
+        td_error = td_target - q_values[action]
+        q_values[action] += self.alpha * td_error
+        logging.debug(f"RL Agent: Updated Q-value for state {state}, action {action}: {q_values[action]:.4f} (TD error: {td_error:.4f})")
+
+# Instantiate the RL agent.
+rl_agent = ParameterTuningAgent()
+
+def apply_rl_action(action):
+    """
+    Applies a discrete action to adjust strategy parameters.
+    Actions:
+      0: Increase RSI_OVERSOLD by 0.5 (max 40)
+      1: Decrease RSI_OVERSOLD by 0.5 (min 20)
+      2: Increase RSI_OVERBOUGHT by 0.5 (max 80)
+      3: Decrease RSI_OVERBOUGHT by 0.5 (min 60)
+      4: Increase RSI_WEIGHT by 0.01
+      5: Decrease RSI_WEIGHT by 0.01
+      6: Increase MACD_WEIGHT by 0.01
+      7: Decrease MACD_WEIGHT by 0.01
+      8: Increase SMA_WEIGHT by 0.01
+      9: Decrease SMA_WEIGHT by 0.01
+      10: Do nothing
+    After weight adjustments, re-normalize weights.
+    """
     with params_lock:
-        if random.random() < rl_epsilon:
-            logging.debug("RL Exploration: Randomly adjusting RSI thresholds.")
-            strategy_params['RSI_OVERSOLD'] = random.uniform(20, 40)
-            strategy_params['RSI_OVERBOUGHT'] = random.uniform(60, 80)
-        else:
-            if sells > buys:
-                logging.debug("RL Exploitation: More sell trades detected; making RSI thresholds more conservative.")
-                strategy_params['RSI_OVERSOLD'] = min(40, strategy_params['RSI_OVERSOLD'] + 0.5)
-                strategy_params['RSI_OVERBOUGHT'] = max(60, strategy_params['RSI_OVERBOUGHT'] - 0.5)
-            else:
-                if strategy_params['RSI_OVERSOLD'] > 30:
-                    strategy_params['RSI_OVERSOLD'] -= 0.5
-                if strategy_params['RSI_OVERBOUGHT'] < 70:
-                    strategy_params['RSI_OVERBOUGHT'] += 0.5
-
-        if random.random() < rl_epsilon:
-            logging.debug("RL Exploration: Randomly adjusting indicator weights.")
-            strategy_params['RSI_WEIGHT']  = random.uniform(0.2, 0.5)
-            strategy_params['MACD_WEIGHT'] = random.uniform(0.2, 0.5)
-            strategy_params['SMA_WEIGHT']  = random.uniform(0.2, 0.5)
-        else:
-            if sells > buys:
-                strategy_params['RSI_WEIGHT']  = max(0.1, strategy_params['RSI_WEIGHT'] - 0.01)
-                strategy_params['MACD_WEIGHT'] = max(0.1, strategy_params['MACD_WEIGHT'] - 0.01)
-                strategy_params['SMA_WEIGHT']  = max(0.1, strategy_params['SMA_WEIGHT'] - 0.01)
-            else:
-                strategy_params['RSI_WEIGHT']  = min(0.9, strategy_params['RSI_WEIGHT'] + 0.01)
-                strategy_params['MACD_WEIGHT'] = min(0.9, strategy_params['MACD_WEIGHT'] + 0.01)
-                strategy_params['SMA_WEIGHT']  = min(0.9, strategy_params['SMA_WEIGHT'] + 0.01)
+        if action == 0:
+            strategy_params['RSI_OVERSOLD'] = min(40, strategy_params['RSI_OVERSOLD'] + 0.5)
+            logging.debug("RL Action: Increased RSI_OVERSOLD")
+        elif action == 1:
+            strategy_params['RSI_OVERSOLD'] = max(20, strategy_params['RSI_OVERSOLD'] - 0.5)
+            logging.debug("RL Action: Decreased RSI_OVERSOLD")
+        elif action == 2:
+            strategy_params['RSI_OVERBOUGHT'] = min(80, strategy_params['RSI_OVERBOUGHT'] + 0.5)
+            logging.debug("RL Action: Increased RSI_OVERBOUGHT")
+        elif action == 3:
+            strategy_params['RSI_OVERBOUGHT'] = max(60, strategy_params['RSI_OVERBOUGHT'] - 0.5)
+            logging.debug("RL Action: Decreased RSI_OVERBOUGHT")
+        elif action == 4:
+            strategy_params['RSI_WEIGHT'] += 0.01
+            logging.debug("RL Action: Increased RSI_WEIGHT")
+        elif action == 5:
+            strategy_params['RSI_WEIGHT'] = max(0.1, strategy_params['RSI_WEIGHT'] - 0.01)
+            logging.debug("RL Action: Decreased RSI_WEIGHT")
+        elif action == 6:
+            strategy_params['MACD_WEIGHT'] += 0.01
+            logging.debug("RL Action: Increased MACD_WEIGHT")
+        elif action == 7:
+            strategy_params['MACD_WEIGHT'] = max(0.1, strategy_params['MACD_WEIGHT'] - 0.01)
+            logging.debug("RL Action: Decreased MACD_WEIGHT")
+        elif action == 8:
+            strategy_params['SMA_WEIGHT'] += 0.01
+            logging.debug("RL Action: Increased SMA_WEIGHT")
+        elif action == 9:
+            strategy_params['SMA_WEIGHT'] = max(0.1, strategy_params['SMA_WEIGHT'] - 0.01)
+            logging.debug("RL Action: Decreased SMA_WEIGHT")
+        elif action == 10:
+            logging.debug("RL Action: No change")
+        # Re-normalize weights so that they sum to 1.
         total = strategy_params['RSI_WEIGHT'] + strategy_params['MACD_WEIGHT'] + strategy_params['SMA_WEIGHT']
-        strategy_params['RSI_WEIGHT']  /= total
+        strategy_params['RSI_WEIGHT'] /= total
         strategy_params['MACD_WEIGHT'] /= total
-        strategy_params['SMA_WEIGHT']  /= total
+        strategy_params['SMA_WEIGHT'] /= total
 
-        logging.debug(f"Updated strategy parameters: {strategy_params}")
+def tuning_loop():
+    """
+    RL-based tuning loop:
+      - Every TUNE_INTERVAL, calculate the reward as the change in cumulative trading profit.
+      - The RL agent observes the current state (performance trend), chooses an action,
+        applies that action to adjust strategy parameters, and updates its Q-values.
+    """
+    TUNE_INTERVAL = 60 * 10  # Tune every 10 minutes
+    logging.info("Starting RL parameter tuning loop...")
+    global previous_cumulative_reward, previous_state
+    previous_cumulative_reward = cumulative_reward
+    previous_state = 0  # initial state: neutral
+    while True:
+        time.sleep(TUNE_INTERVAL)
+        with trade_log_lock:
+            current_reward = cumulative_reward
+        # Compute reward as the change in cumulative reward over the interval.
+        reward = current_reward - previous_cumulative_reward
+        # Determine new state: 1 if positive reward, -1 if negative, 0 if no change.
+        new_state = 1 if reward > 0 else (-1 if reward < 0 else 0)
+        # RL agent chooses an action based on the previous state.
+        action = rl_agent.choose_action(previous_state)
+        apply_rl_action(action)
+        update_strategy_params(strategy_params)
+        # Update Q-values for the RL agent.
+        rl_agent.update(previous_state, action, reward, new_state)
+        logging.info(f"RL tuning: prev_state={previous_state}, action={action}, reward={reward:.2f}, new_state={new_state}")
+        previous_state = new_state
+        previous_cumulative_reward = current_reward
 
 # ==============================
 # END-OF-DAY WATCHLIST DISCOVERY
@@ -578,14 +677,6 @@ def trading_loop():
         
         time.sleep(CHECK_INTERVAL)
 
-def tuning_loop():
-    TUNE_INTERVAL = 60 * 10  # Tune every 10 minutes
-    logging.info("Starting parameter tuning loop...")
-    while True:
-        tune_parameters()
-        update_strategy_params(strategy_params)
-        time.sleep(TUNE_INTERVAL)
-
 # ==============================
 # FLASK WEB DASHBOARD
 # ==============================
@@ -636,4 +727,3 @@ def main():
 
 if __name__ == '__main__':
     main()
- 
