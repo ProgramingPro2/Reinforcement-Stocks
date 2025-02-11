@@ -64,7 +64,7 @@ A fully featured trading bot that uses reinforcement learning–inspired paramet
    ALPACA_SECRET=your_api_secret_here
    ENDPOINT=https://paper-api.alpaca.markets
    ```
-   Adjust the ORDER_AMOUNT (dollar amount per trade) and other strategy parameters in the source code as needed.
+   Adjust the ORDER_AMOUNT (dollar amount per trade) and other strategy parameters in the data.json file or main.py as needed.
 
 ## Watchlist
 Create a stocks.json file in the working directory containing a list of stock tickers. For example:

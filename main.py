@@ -88,7 +88,9 @@ default_params = {
     # Composite signal decision thresholds:
     'BUY_THRESHOLD': 0.5,
     'SELL_THRESHOLD': -0.5,
-    'WATCHLIST_SIZE': 100
+    'WATCHLIST_SIZE': 100,
+    'CHECK_INTERVAL_MINUTES': 5,
+    'TUNE_INTERVAL_MINUTES': 10
 }
 strategy_params = default_params.copy()
 params_lock = threading.Lock()  # Protect access to strategy_params
@@ -99,7 +101,8 @@ print(f"Working directory: {working_dir}")
 
 DATA_TIMEFRAME = '1d'
 HIST_DAYS = 100          # Number of historical days used for indicator calculations
-CHECK_INTERVAL = 60 * 5  # Check every 5 minutes
+CHECK_INTERVAL_MINUTES = strategy_params['CHECK_INTERVAL_MINUTES']
+CHECK_INTERVAL = 60 * CHECK_INTERVAL_MINUTES  # Check every x minutes
 
 # Trade performance log (store recent trades in memory)
 trade_log = deque(maxlen=100)
@@ -596,7 +599,8 @@ def tuning_loop():
       - The RL agent observes the current state (performance trend), chooses an action,
         applies that action to adjust strategy parameters, and updates its Q-values.
     """
-    TUNE_INTERVAL = 60 * 10  # Tune every 10 minutes
+    TUNE_INTERVAL_MINUTES = strategy_params['TUNE_INTERVAL_MINUTES']
+    TUNE_INTERVAL = 60 * TUNE_INTERVAL_MINUTES  # Tune every 10 minutes
     logging.info("Starting RL parameter tuning loop...")
     global previous_cumulative_reward, previous_state
     previous_cumulative_reward = cumulative_reward
