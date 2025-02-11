@@ -20,8 +20,9 @@ Before running:
         ALPACA_KEY=your_api_key_here
         ALPACA_SECRET=your_api_secret_here
         ENDPOINT=https://paper-api.alpaca.markets
-  - Make a file called "stocks.json" with a list of stock tickers in the watchlist
-  - Set ORDER_AMOUNT to the dollar amount you want to trade per trade
+  - Make a file called "stocks.json" with a list of stock tickers (read-only full list).
+  - Make a file called "watchlist.json" with a list of stock tickers you wish to trade.
+  - Set ORDER_AMOUNT to the dollar amount you want to trade per trade.
   - Use Alpaca's paper trading endpoint for testing.
   - This example uses Python 3.11+.
 """
@@ -107,9 +108,26 @@ trade_log_lock = threading.Lock()
 latest_signals = {}
 signals_lock = threading.Lock()
 
-WATCHLIST_FILE = working_dir + "/watchlist.json"
-DATA_FILE = working_dir + "/data.json"
+# Files for persistence
+WATCHLIST_FILE = os.path.join(working_dir, "watchlist.json")
+DATA_FILE = os.path.join(working_dir, "data.json")
 
+# ------------------------------
+# Load Watchlist from watchlist.json
+# ------------------------------
+if os.path.exists(WATCHLIST_FILE):
+    with open(WATCHLIST_FILE, "r") as f:
+        try:
+            WATCHLIST = json.load(f)
+        except json.JSONDecodeError:
+            logging.error("Error loading JSON from watchlist.json, initializing empty watchlist.")
+            WATCHLIST = []
+else:
+    WATCHLIST = []
+
+# ------------------------------
+# Load Full Stocks (Candidate Pool) from stocks.json (read-only)
+# ------------------------------
 DEFAULT_CANDIDATE_POOL = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "FB", "NVDA", "JPM", "V", "JNJ",
     "WMT", "PG", "MA", "DIS", "HD", "UNH", "BAC", "XOM", "VZ", "ADBE",
@@ -117,26 +135,27 @@ DEFAULT_CANDIDATE_POOL = [
     "ABBV", "ACN", "AVGO", "QCOM", "TXN", "COST", "NEE", "NKE", "MRK", "WFC",
     "LLY", "MDT", "MCD", "PM", "ORCL", "BA", "IBM", "HON", "AMGN"
 ]
-STOCK_FILE = working_dir + "/stocks.json"
-if os.path.exists(STOCK_FILE):
-    with open(STOCK_FILE, "r") as f:
+STOCK_FILE = os.path.join(working_dir, "stocks.json")
+def load_watchlist():
+    if os.path.exists(STOCK_FILE):
         try:
-            data = json.load(f)
-            WATCHLIST = data
-        except json.JSONDecodeError:
-            logging.error("Error loading JSON, initializing empty watchlist.")
-            WATCHLIST = []
-else:
-    WATCHLIST = []
-if os.path.exists(STOCK_FILE):
-    with open(STOCK_FILE, "r") as f:
-        try:
-            data = json.load(f)
-            DEFAULT_CANDIDATE_POOL = data
-        except json.JSONDecodeError:
-            logging.error(f"Error loading JSON {STOCK_FILE}, initializing default data.")
-else:
-    logging.error(f"Error loading JSON {STOCK_FILE}, initializing default data.")
+            with open(STOCK_FILE, "r") as f:
+                watchlist = json.load(f)
+                if isinstance(watchlist, list) and all(isinstance(item, str) for item in watchlist):
+                    logging.info(f"Loaded {len(watchlist)} stocks from stocks.json")
+                    return watchlist
+                else:
+                    logging.error("Invalid JSON format in stocks.json. Expected a list of stock symbols.")
+        except json.JSONDecodeError as e:
+            logging.error(f"Error parsing stocks.json: {e}")
+    else:
+        logging.warning("stocks.json not found. Creating a default watchlist.")
+        with open(STOCK_FILE, "w") as f:
+            json.dump(DEFAULT_CANDIDATE_POOL[:50], f, indent=4)  # Save 50 default stocks
+        return DEFAULT_CANDIDATE_POOL[:50]  # Default to the top 50 candidates
+
+WATCHLIST = load_watchlist()
+
 
 # Last date that discovery was run.
 last_discovery_date = None
@@ -582,22 +601,25 @@ def tuning_loop():
     previous_cumulative_reward = cumulative_reward
     previous_state = 0  # initial state: neutral
     while True:
-        time.sleep(TUNE_INTERVAL)
-        with trade_log_lock:
-            current_reward = cumulative_reward
-        # Compute reward as the change in cumulative reward over the interval.
-        reward = current_reward - previous_cumulative_reward
-        # Determine new state: 1 if positive reward, -1 if negative, 0 if no change.
-        new_state = 1 if reward > 0 else (-1 if reward < 0 else 0)
-        # RL agent chooses an action based on the previous state.
-        action = rl_agent.choose_action(previous_state)
-        apply_rl_action(action)
-        update_strategy_params(strategy_params)
-        # Update Q-values for the RL agent.
-        rl_agent.update(previous_state, action, reward, new_state)
-        logging.info(f"RL tuning: prev_state={previous_state}, action={action}, reward={reward:.2f}, new_state={new_state}")
-        previous_state = new_state
-        previous_cumulative_reward = current_reward
+        try:
+            time.sleep(TUNE_INTERVAL)
+            with trade_log_lock:
+                current_reward = cumulative_reward
+            # Compute reward as the change in cumulative reward over the interval.
+            reward = current_reward - previous_cumulative_reward
+            # Determine new state: 1 if positive reward, -1 if negative, 0 if no change.
+            new_state = 1 if reward > 0 else (-1 if reward < 0 else 0)
+            # RL agent chooses an action based on the previous state.
+            action = rl_agent.choose_action(previous_state)
+            apply_rl_action(action)
+            update_strategy_params(strategy_params)
+            # Update Q-values for the RL agent.
+            rl_agent.update(previous_state, action, reward, new_state)
+            logging.info("RL tuning: prev_state=%s, action=%s, reward=%.2f, new_state=%s", previous_state, action, reward, new_state)
+            previous_state = new_state
+            previous_cumulative_reward = current_reward
+        except Exception as e:
+            logging.error("Error in tuning loop: %s", e)
 
 # ==============================
 # END-OF-DAY WATCHLIST DISCOVERY
@@ -642,7 +664,8 @@ def update_watchlist(api: tradeapi.REST):
     # Remove duplicates and limit to 100.
     new_watchlist = list(dict.fromkeys(new_watchlist))[:100]
     WATCHLIST = new_watchlist
-    with open(STOCK_FILE, "w") as f:
+    # Save the updated watchlist to watchlist.json
+    with open(WATCHLIST_FILE, "w") as f:
         json.dump(WATCHLIST, f, indent=4)
     logging.info("Updated watchlist at end of day. Total stocks in watchlist: %d", len(WATCHLIST))
 
@@ -660,21 +683,24 @@ def trading_loop():
     global last_discovery_date
     logging.info("Starting trading loop...")
     while True:
-        if is_market_open():
-            scan_and_trade(api)
-        else:
-            logging.debug("Market is closed. Skipping trading scan.")
-        
-        # Check if it is time for end-of-day watchlist discovery.
-        now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
-        discovery_time = now_et.replace(hour=16, minute=30, second=0, microsecond=0)
-        if now_et >= discovery_time:
-            today_str = now_et.strftime("%Y-%m-%d")
-            if last_discovery_date != today_str:
-                logging.info("Running end-of-day watchlist discovery...")
-                update_watchlist(api)
-                last_discovery_date = today_str
-        
+        try:
+            if is_market_open():
+                logging.debug("Market is open. Doing trading scan.")
+                scan_and_trade(api)
+            else:
+                logging.debug("Market is closed. Skipping trading scan.")
+            
+            # Check if it is time for end-of-day watchlist discovery.
+            now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
+            discovery_time = now_et.replace(hour=16, minute=30, second=0, microsecond=0)
+            if now_et >= discovery_time:
+                today_str = now_et.strftime("%Y-%m-%d")
+                if last_discovery_date != today_str:
+                    logging.info("Running end-of-day watchlist discovery...")
+                    update_watchlist(api)
+                    last_discovery_date = today_str
+        except Exception as e:
+            logging.error("Error in trading loop: %s", e)
         time.sleep(CHECK_INTERVAL)
 
 # ==============================
@@ -723,7 +749,8 @@ def main():
     trading_thread.start()
     tuning_thread.start()
     logging.info("Starting Flask dashboard on http://0.0.0.0:5000")
-    app.run(host='0.0.0.0', port=5000, debug=DEBUG)
+    # Disable Flask's auto-reloader to prevent duplicate threads in debug mode.
+    app.run(host='0.0.0.0', port=5000, debug=DEBUG, use_reloader=False)
 
 if __name__ == '__main__':
     main()
