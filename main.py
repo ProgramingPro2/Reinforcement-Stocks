@@ -88,6 +88,7 @@ default_params = {
     # Composite signal decision thresholds:
     'BUY_THRESHOLD': 0.5,
     'SELL_THRESHOLD': -0.5,
+    'WATCHLIST_SIZE': 100
 }
 strategy_params = default_params.copy()
 params_lock = threading.Lock()  # Protect access to strategy_params
@@ -151,8 +152,8 @@ def load_watchlist():
     else:
         logging.warning("stocks.json not found. Creating a default watchlist.")
         with open(STOCK_FILE, "w") as f:
-            json.dump(DEFAULT_CANDIDATE_POOL[:50], f, indent=4)  # Save 50 default stocks
-        return DEFAULT_CANDIDATE_POOL[:50]  # Default to the top 50 candidates
+            json.dump(DEFAULT_CANDIDATE_POOL[:int(strategy_params['WATCHLIST_SIZE'])], f, indent=4)  # Save 50 default stocks
+        return DEFAULT_CANDIDATE_POOL[:int(strategy_params['WATCHLIST_SIZE'])]  # Default to the top 50 candidates
 
 WATCHLIST = load_watchlist()
 
