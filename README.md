@@ -38,7 +38,7 @@ A fully featured trading bot that uses reinforcement learning–inspired paramet
    source venv/bin/activate
    pip install alpaca_trade_api pandas numpy flask python-dotenv yfinance
    ```
-   Windows (Not Tested):
+   Windows:
    ```bash
    python3 -m venv venv
    venv\Scripts\activate
