@@ -274,7 +274,7 @@ def submit_order(api: tradeapi.REST, symbol: str, qty: int, side: str, order_typ
         return None
 
 def calculate_order_quantity(price: float, order_amount: float) -> int:
-    qty = max(1, int(order_amount / price))
+    qty = max(0.01, float(order_amount / price))
     logging.debug(f"Calculated order quantity: {qty} shares at price {price} for order amount {order_amount}")
     return qty
 
