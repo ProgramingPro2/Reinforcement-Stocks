@@ -83,6 +83,37 @@
   <div class="container my-4">
     <!-- Countdown Timer -->
     <div id="countdown" class="text-center mb-4 fs-5"></div>
+
+    <!-- Performance vs Benchmarks -->
+    <h2>Performance vs Benchmarks</h2>
+    <canvas id="performanceChart"></canvas>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        var performanceData = {{ performance_data | tojson | safe }};
+        if (performanceData.length) {
+            var ctx = document.getElementById('performanceChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: performanceData.map(d => d.date),
+                    datasets: [{
+                        label: 'Portfolio',
+                        data: performanceData.map(d => d.portfolio),
+                        borderColor: 'rgb(75, 192, 192)'
+                    }, {
+                        label: 'NASDAQ',
+                        data: performanceData.map(d => d.nasdaq),
+                        borderColor: 'rgb(255, 99, 132)'
+                    }, {
+                        label: 'S&P 500',
+                        data: performanceData.map(d => d.sp500),
+                        borderColor: 'rgb(54, 162, 235)'
+                    }]
+                },
+                options: { responsive: true, scales: { y: { beginAtZero: false } } }
+            });
+        }
+    </script>
     
     <!-- Strategy Parameters Card -->
     <div class="card">

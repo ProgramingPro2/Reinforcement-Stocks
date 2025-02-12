@@ -116,6 +116,9 @@ signals_lock = threading.Lock()
 WATCHLIST_FILE = os.path.join(working_dir, "watchlist.json")
 DATA_FILE = os.path.join(working_dir, "data.json")
 
+portfolio_history = deque(maxlen=1000)  # Store daily portfolio and index values
+portfolio_history_lock = threading.Lock()
+
 # ------------------------------
 # Load Watchlist from watchlist.json
 # ------------------------------
@@ -169,7 +172,7 @@ last_discovery_date = None
 # ==============================
 
 def load_data():
-    global strategy_params, latest_signals, trade_log
+    global strategy_params, latest_signals, trade_log, portfolio_history
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
             try:
@@ -181,6 +184,7 @@ def load_data():
                 strategy_params = loaded_params or strategy_params
                 latest_signals = data.get("signals", latest_signals)
                 trade_log = deque(data.get("trade_log", []), maxlen=100)
+                portfolio_history = deque(data.get("portfolio_history", []), maxlen=1000)
                 logging.debug("Data loaded successfully from data.json.")
             except json.JSONDecodeError:
                 logging.error(f"Error loading JSON {DATA_FILE}, initializing default data.")
@@ -192,7 +196,8 @@ def save_data():
     data = {
         "params": strategy_params,
         "signals": latest_signals,
-        "trade_log": list(trade_log)
+        "trade_log": list(trade_log),
+        "portfolio_history": list(portfolio_history)
     }
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
@@ -208,6 +213,41 @@ load_data()
 # ==============================
 # HELPER FUNCTIONS & INDICATORS
 # ==============================
+
+def record_daily_portfolio_value(api: tradeapi.REST):
+    try:
+        account = api.get_account()
+        cash = float(account.cash)
+        positions = api.list_positions()
+        positions_value = sum(float(pos.market_value) for pos in positions)
+        total_value = cash + positions_value
+
+        now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
+        today_date = now_et.strftime("%Y-%m-%d")
+
+        nasdaq_ticker = yf.Ticker("^IXIC")
+        sp500_ticker = yf.Ticker("^GSPC")
+
+        nasdaq_hist = nasdaq_ticker.history(period="1d")
+        sp500_hist = sp500_ticker.history(period="1d")
+
+        nasdaq_close = nasdaq_hist['Close'].iloc[-1] if not nasdaq_hist.empty else 0
+        sp500_close = sp500_hist['Close'].iloc[-1] if not sp500_hist.empty else 0
+
+        entry = {
+            'date': today_date,
+            'portfolio_value': total_value,
+            'nasdaq_close': nasdaq_close,
+            'sp500_close': sp500_close
+        }
+
+        with portfolio_history_lock:
+            if not portfolio_history or portfolio_history[-1]['date'] != today_date:
+                portfolio_history.append(entry)
+                logging.info(f"Recorded daily portfolio value: {entry}")
+        save_data()
+    except Exception as e:
+        logging.error(f"Error recording daily portfolio value: {e}")
 
 def calculate_rsi(prices: pd.Series, period: int) -> pd.Series:
     logging.debug("Calculating RSI...")
@@ -714,6 +754,7 @@ def trading_loop():
                     logging.info("Running end-of-day watchlist discovery...")
                     update_watchlist(api)
                     last_discovery_date = today_str
+                    record_daily_portfolio_value(api)
         except Exception as e:
             logging.error("Error in trading loop: %s", e)
         time.sleep(CHECK_INTERVAL)
@@ -732,11 +773,29 @@ def dashboard():
         current_signals = latest_signals.copy()
     with trade_log_lock:
         trades = list(trade_log)
+    with portfolio_history_lock:
+        history = list(portfolio_history)
+    performance_data = []
+    if history:
+        baseline = history[0]
+        for entry in history:
+            norm_portfolio = (entry['portfolio_value'] / baseline['portfolio_value']) * 100
+            norm_nasdaq = (entry['nasdaq_close'] / baseline['nasdaq_close']) * 100
+            norm_sp500 = (entry['sp500_close'] / baseline['sp500_close']) * 100
+            performance_data.append({
+                'date': entry['date'],
+                'portfolio': round(norm_portfolio, 2),
+                'nasdaq': round(norm_nasdaq, 2),
+                'sp500': round(norm_sp500, 2)
+            })
+
     return render_template('index.html',
                            params=current_params,
                            signals=current_signals,
                            trade_log=trades,
-                           check_interval=CHECK_INTERVAL)
+                           check_interval=CHECK_INTERVAL,
+                           performance_data=performance_data)
+
 
 @app.route('/api/status')
 def api_status():
