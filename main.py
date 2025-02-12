@@ -272,6 +272,11 @@ def submit_order(api: tradeapi.REST, symbol: str, qty: int, side: str, order_typ
     except Exception as e:
         logging.error(f"Order submission failed for {symbol}: {e}")
         return None
+    
+def liquidate_all_positions(api: tradeapi.REST):
+    positions = api.list_positions()
+    for pos in positions:
+        submit_order(api, pos.symbol, pos.qty, 'sell')
 
 def calculate_order_quantity(price: float, order_amount: float) -> int:
     qty = max(0.01, round(float(order_amount / price), 2))
@@ -692,6 +697,11 @@ def trading_loop():
             if is_market_open():
                 logging.debug("Market is open. Doing trading scan.")
                 scan_and_trade(api)
+
+                now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
+                market_close = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+                if market_close - 10 <= now_et < market_close:
+                    liquidate_all_positions(api)
             else:
                 logging.debug("Market is closed. Skipping trading scan.")
             
