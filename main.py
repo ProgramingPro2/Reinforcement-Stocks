@@ -216,6 +216,7 @@ load_data()
 
 def record_daily_portfolio_value(api: tradeapi.REST):
     try:
+        # Get portfolio value
         account = api.get_account()
         cash = float(account.cash)
         positions = api.list_positions()
@@ -225,27 +226,36 @@ def record_daily_portfolio_value(api: tradeapi.REST):
         now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
         today_date = now_et.strftime("%Y-%m-%d")
 
-        nasdaq_ticker = yf.Ticker("^IXIC")
-        sp500_ticker = yf.Ticker("^GSPC")
+        # Get index data with proper error handling
+        def get_index_close(ticker_symbol):
+            try:
+                ticker = yf.Ticker(ticker_symbol)
+                hist = ticker.history(period="2d")  # Get 2 days to ensure we have data
+                if not hist.empty and 'Close' in hist:
+                    return hist['Close'].iloc[-1]
+                return None
+            except Exception as e:
+                logging.error(f"Error getting {ticker_symbol} data: {e}")
+                return None
 
-        nasdaq_hist = nasdaq_ticker.history(period="1d")
-        sp500_hist = sp500_ticker.history(period="1d")
+        nasdaq_close = get_index_close("^IXIC")
+        sp500_close = get_index_close("^GSPC")
 
-        nasdaq_close = nasdaq_hist['Close'].iloc[-1] if not nasdaq_hist.empty else 0
-        sp500_close = sp500_hist['Close'].iloc[-1] if not sp500_hist.empty else 0
+        # Only record if we have valid index data
+        if nasdaq_close is not None and sp500_close is not None:
+            entry = {
+                'date': today_date,
+                'portfolio_value': total_value,
+                'nasdaq_close': nasdaq_close,
+                'sp500_close': sp500_close
+            }
 
-        entry = {
-            'date': today_date,
-            'portfolio_value': total_value,
-            'nasdaq_close': nasdaq_close,
-            'sp500_close': sp500_close
-        }
-
-        with portfolio_history_lock:
-            if not portfolio_history or portfolio_history[-1]['date'] != today_date:
-                portfolio_history.append(entry)
-                logging.info(f"Recorded daily portfolio value: {entry}")
-        save_data()
+            with portfolio_history_lock:
+                # Only add entry if date doesn't exist
+                if not any(e['date'] == today_date for e in portfolio_history):
+                    portfolio_history.append(entry)
+                    logging.info(f"Recorded daily portfolio value: {entry}")
+            save_data()
     except Exception as e:
         logging.error(f"Error recording daily portfolio value: {e}")
 
@@ -765,6 +775,7 @@ def trading_loop():
 
 app = Flask(__name__)
 
+
 @app.route('/')
 def dashboard():
     with params_lock:
@@ -775,26 +786,34 @@ def dashboard():
         trades = list(trade_log)
     with portfolio_history_lock:
         history = list(portfolio_history)
+
     performance_data = []
-    if history:
-        baseline = history[0]
-        for entry in history:
-            norm_portfolio = (entry['portfolio_value'] / baseline['portfolio_value']) * 100
-            norm_nasdaq = (entry['nasdaq_close'] / baseline['nasdaq_close']) * 100
-            norm_sp500 = (entry['sp500_close'] / baseline['sp500_close']) * 100
-            performance_data.append({
-                'date': entry['date'],
-                'portfolio': round(norm_portfolio, 2),
-                'nasdaq': round(norm_nasdaq, 2),
-                'sp500': round(norm_sp500, 2)
-            })
+    if len(history) >= 2:  # Need at least 2 data points
+        # Find first valid baseline
+        baseline = next((item for item in history if item['nasdaq_close'] > 0 and item['sp500_close'] > 0), None)
+        if baseline:
+            for entry in history:
+                # Skip entries with invalid index data
+                if entry['nasdaq_close'] <= 0 or entry['sp500_close'] <= 0:
+                    continue
+                
+                norm_portfolio = (entry['portfolio_value'] / baseline['portfolio_value']) * 100
+                norm_nasdaq = (entry['nasdaq_close'] / baseline['nasdaq_close']) * 100
+                norm_sp500 = (entry['sp500_close'] / baseline['sp500_close']) * 100
+                
+                performance_data.append({
+                    'date': entry['date'],
+                    'portfolio': round(norm_portfolio, 2),
+                    'nasdaq': round(norm_nasdaq, 2),
+                    'sp500': round(norm_sp500, 2)
+                })
 
     return render_template('index.html',
                            params=current_params,
                            signals=current_signals,
                            trade_log=trades,
-                           check_interval=CHECK_INTERVAL,
-                           performance_data=performance_data)
+                           performance_data=performance_data,
+                           check_interval=CHECK_INTERVAL)
 
 
 @app.route('/api/status')

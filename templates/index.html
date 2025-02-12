@@ -86,33 +86,66 @@
 
     <!-- Performance vs Benchmarks -->
     <h2>Performance vs Benchmarks</h2>
-    <canvas id="performanceChart"></canvas>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <div style="position: relative; height:40vh; width:80vw">
+        <canvas id="performanceChart"></canvas>
+    </div>
+    
+    <script src="{{ url_for('static', filename='chart.js') }}"></script>
     <script>
-        var performanceData = {{ performance_data | tojson | safe }};
-        if (performanceData.length) {
-            var ctx = document.getElementById('performanceChart').getContext('2d');
-            new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: performanceData.map(d => d.date),
-                    datasets: [{
-                        label: 'Portfolio',
-                        data: performanceData.map(d => d.portfolio),
-                        borderColor: 'rgb(75, 192, 192)'
-                    }, {
-                        label: 'NASDAQ',
-                        data: performanceData.map(d => d.nasdaq),
-                        borderColor: 'rgb(255, 99, 132)'
-                    }, {
-                        label: 'S&P 500',
-                        data: performanceData.map(d => d.sp500),
-                        borderColor: 'rgb(54, 162, 235)'
-                    }]
-                },
-                options: { responsive: true, scales: { y: { beginAtZero: false } } }
-            });
-        }
+        document.addEventListener('DOMContentLoaded', function() {
+            var performanceData = {{ performance_data | tojson | safe }};
+            if (performanceData.length > 0) {
+                var ctx = document.getElementById('performanceChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: performanceData.map(d => d.date),
+                        datasets: [
+                            {
+                                label: 'Your Portfolio',
+                                data: performanceData.map(d => d.portfolio),
+                                borderColor: '#3e95cd',
+                                fill: false
+                            },
+                            {
+                                label: 'NASDAQ',
+                                data: performanceData.map(d => d.nasdaq),
+                                borderColor: '#8e5ea2',
+                                fill: false
+                            },
+                            {
+                                label: 'S&P 500',
+                                data: performanceData.map(d => d.sp500),
+                                borderColor: '#3cba9f',
+                                fill: false
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Normalized Performance Comparison'
+                            }
+                        },
+                        scales: {
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                title: {
+                                    display: true,
+                                    text: 'Normalized Value (%)'
+                                }
+                            }
+                        }
+                    }
+                });
+            } else {
+                console.log("No performance data available");
+            }
+        });
     </script>
     
     <!-- Strategy Parameters Card -->
