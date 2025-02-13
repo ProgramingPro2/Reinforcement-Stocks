@@ -214,7 +214,8 @@ load_data()
 # HELPER FUNCTIONS & INDICATORS
 # ==============================
 
-def record_daily_portfolio_value(api: tradeapi.REST):
+def record_portfolio_value(api: tradeapi.REST):
+    """Records portfolio and index values every 5 minutes"""
     try:
         # Get portfolio value
         account = api.get_account()
@@ -224,16 +225,16 @@ def record_daily_portfolio_value(api: tradeapi.REST):
         total_value = cash + positions_value
 
         now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
-        today_date = now_et.strftime("%Y-%m-%d")
+        timestamp = now_et.isoformat()
 
-        # Get index data with proper error handling
+        # Get latest available index values (intraday or previous close)
         def get_index_close(ticker_symbol):
             try:
                 ticker = yf.Ticker(ticker_symbol)
-                hist = ticker.history(period="2d")  # Get 2 days to ensure we have data
+                hist = ticker.history(period="1d", interval="1m")
                 if not hist.empty and 'Close' in hist:
                     return hist['Close'].iloc[-1]
-                return None
+                return hist['Close'].iloc[-1] if not hist.empty else None
             except Exception as e:
                 logging.error(f"Error getting {ticker_symbol} data: {e}")
                 return None
@@ -241,23 +242,22 @@ def record_daily_portfolio_value(api: tradeapi.REST):
         nasdaq_close = get_index_close("^IXIC")
         sp500_close = get_index_close("^GSPC")
 
-        # Only record if we have valid index data
-        if nasdaq_close is not None and sp500_close is not None:
-            entry = {
-                'date': today_date,
-                'portfolio_value': total_value,
-                'nasdaq_close': nasdaq_close,
-                'sp500_close': sp500_close
-            }
+        entry = {
+            'timestamp': timestamp,
+            'portfolio_value': total_value,
+            'nasdaq_close': nasdaq_close,
+            'sp500_close': sp500_close
+        }
 
-            with portfolio_history_lock:
-                # Only add entry if date doesn't exist
-                if not any(e['date'] == today_date for e in portfolio_history):
-                    portfolio_history.append(entry)
-                    logging.info(f"Recorded daily portfolio value: {entry}")
-            save_data()
+        with portfolio_history_lock:
+            # Keep only one entry per 5-minute interval
+            if len(portfolio_history) == 0 or \
+               (now_et - datetime.datetime.fromisoformat(portfolio_history[-1]['timestamp'])).seconds >= 300:
+                portfolio_history.append(entry)
+                logging.info(f"Recorded portfolio value: {entry}")
+                save_data()
     except Exception as e:
-        logging.error(f"Error recording daily portfolio value: {e}")
+        logging.error(f"Error recording portfolio value: {e}")
 
 def calculate_rsi(prices: pd.Series, period: int) -> pd.Series:
     logging.debug("Calculating RSI...")
@@ -742,32 +742,29 @@ def trading_loop():
     api = tradeapi.REST(API_KEY, API_SECRET, BASE_URL, api_version='v2')
     global last_discovery_date
     logging.info("Starting trading loop...")
+    
     while True:
         try:
-            if is_market_open():
-                logging.debug("Market is open. Doing trading scan.")
-                scan_and_trade(api)
-
-                now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
-                market_close = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
-                if market_close - datetime.timedelta(minutes=CHECK_INTERVAL*2) <= now_et < market_close:
-                    liquidate_all_positions(api)
-            else:
-                logging.debug("Market is closed. Skipping trading scan.")
+            # Always record portfolio value every 5 minutes
+            record_portfolio_value(api)
             
-            # Check if it is time for end-of-day watchlist discovery.
-            now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
-            discovery_time = now_et.replace(hour=16, minute=30, second=0, microsecond=0)
-            if now_et >= discovery_time:
-                today_str = now_et.strftime("%Y-%m-%d")
-                if last_discovery_date != today_str:
-                    logging.info("Running end-of-day watchlist discovery...")
-                    update_watchlist(api)
-                    last_discovery_date = today_str
-                    record_daily_portfolio_value(api)
+            if is_market_open():
+                scan_and_trade(api)
+            else:
+                # Handle end-of-day discovery once per day
+                now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
+                discovery_time = now_et.replace(hour=16, minute=30, second=0)
+                if now_et >= discovery_time:
+                    today_str = now_et.strftime("%Y-%m-%d")
+                    if last_discovery_date != today_str:
+                        update_watchlist(api)
+                        last_discovery_date = today_str
+            
+            time.sleep(60 * 5)  # Run every 5 minutes
+
         except Exception as e:
-            logging.error("Error in trading loop: %s", e)
-        time.sleep(CHECK_INTERVAL)
+            logging.error(f"Error in trading loop: {e}")
+            time.sleep(60)
 
 # ==============================
 # FLASK WEB DASHBOARD
@@ -788,26 +785,30 @@ def dashboard():
         history = list(portfolio_history)
 
     performance_data = []
-    if len(history) >= 2:  # Need at least 2 data points
-        # Find first valid baseline
-        baseline = next((item for item in history if item['nasdaq_close'] > 0 and item['sp500_close'] > 0), None)
+    if history:
+        # Find first valid baseline with all data points
+        baseline = next((
+            item for item in history 
+            if item['nasdaq_close'] is not None 
+            and item['sp500_close'] is not None
+            and item['nasdaq_close'] > 0
+            and item['sp500_close'] > 0
+        ), None)
+
         if baseline:
             for entry in history:
-                # Skip entries with invalid index data
-                if entry['nasdaq_close'] <= 0 or entry['sp500_close'] <= 0:
-                    continue
-                
-                norm_portfolio = (entry['portfolio_value'] / baseline['portfolio_value']) * 100
-                norm_nasdaq = (entry['nasdaq_close'] / baseline['nasdaq_close']) * 100
-                norm_sp500 = (entry['sp500_close'] / baseline['sp500_close']) * 100
-                
-                performance_data.append({
-                    'date': entry['date'],
-                    'portfolio': round(norm_portfolio, 2),
-                    'nasdaq': round(norm_nasdaq, 2),
-                    'sp500': round(norm_sp500, 2)
-                })
-
+                if entry['nasdaq_close'] and entry['sp500_close']:
+                    norm_portfolio = (entry['portfolio_value'] / baseline['portfolio_value']) * 100
+                    norm_nasdaq = (entry['nasdaq_close'] / baseline['nasdaq_close']) * 100
+                    norm_sp500 = (entry['sp500_close'] / baseline['sp500_close']) * 100
+                    
+                    dt = datetime.datetime.fromisoformat(entry['timestamp'])
+                    performance_data.append({
+                        'time': dt.strftime("%m-%d %H:%M"),
+                        'portfolio': round(norm_portfolio, 2),
+                        'nasdaq': round(norm_nasdaq, 2),
+                        'sp500': round(norm_sp500, 2)
+                    })
     return render_template('index.html',
                            params=current_params,
                            signals=current_signals,

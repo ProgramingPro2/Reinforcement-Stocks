@@ -92,62 +92,62 @@
     
     <script src="{{ url_for('static', filename='chart.js') }}"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            var performanceData = {{ performance_data | tojson | safe }};
-            if (performanceData.length > 0) {
-                var ctx = document.getElementById('performanceChart').getContext('2d');
-                new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: performanceData.map(d => d.date),
-                        datasets: [
-                            {
-                                label: 'Your Portfolio',
-                                data: performanceData.map(d => d.portfolio),
-                                borderColor: '#3e95cd',
-                                fill: false
-                            },
-                            {
-                                label: 'NASDAQ',
-                                data: performanceData.map(d => d.nasdaq),
-                                borderColor: '#8e5ea2',
-                                fill: false
-                            },
-                            {
-                                label: 'S&P 500',
-                                data: performanceData.map(d => d.sp500),
-                                borderColor: '#3cba9f',
-                                fill: false
-                            }
-                        ]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            title: {
-                                display: true,
-                                text: 'Normalized Performance Comparison'
+    document.addEventListener('DOMContentLoaded', function() {
+        var performanceData = {{ performance_data | tojson | safe }};
+        if (performanceData.length > 0) {
+            var ctx = document.getElementById('performanceChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: performanceData.map(d => d.time),
+                    datasets: [
+                        {
+                            label: 'Your Portfolio',
+                            data: performanceData.map(d => d.portfolio),
+                            borderColor: '#3e95cd',
+                            fill: false
+                        },
+                        {
+                            label: 'NASDAQ',
+                            data: performanceData.map(d => d.nasdaq),
+                            borderColor: '#8e5ea2',
+                            fill: false
+                        },
+                        {
+                            label: 'S&P 500',
+                            data: performanceData.map(d => d.sp500),
+                            borderColor: '#3cba9f',
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'hour',
+                                displayFormats: {
+                                    hour: 'MMM dd HH:mm'
+                                }
                             }
                         },
-                        scales: {
-                            y: {
-                                type: 'linear',
+                        y: {
+                            title: {
                                 display: true,
-                                title: {
-                                    display: true,
-                                    text: 'Normalized Value (%)'
-                                }
+                                text: 'Normalized Performance (%)'
                             }
                         }
                     }
-                });
-            } else {
-                console.log("No performance data available");
-            }
-        });
-    </script>
-    
+                }
+            });
+        } else {
+            console.log("Performance data available but no valid baseline");
+        }
+    });
+</script>    
     <!-- Strategy Parameters Card -->
     <div class="card">
       <div class="card-header bg-secondary text-white">
