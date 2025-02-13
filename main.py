@@ -750,7 +750,7 @@ def trading_loop():
 
                 now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
                 market_close = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
-                if market_close - 10 <= now_et < market_close:
+                if market_close - datetime.timedelta(minutes=CHECK_INTERVAL*2) <= now_et < market_close:
                     liquidate_all_positions(api)
             else:
                 logging.debug("Market is closed. Skipping trading scan.")
