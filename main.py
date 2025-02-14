@@ -52,13 +52,25 @@ parser.add_argument('--debug', action='store_true', help='Enable debug logging')
 args, unknown = parser.parse_known_args()
 DEBUG = args.debug
 
+
 if DEBUG:
-    logging.basicConfig(level=logging.DEBUG,
-                        format='%(asctime)s - %(levelname)s - %(message)s')
-    logging.debug("Debug flag enabled. Logging set to DEBUG.")
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler("debug.log", mode="w"),
+            logging.StreamHandler()
+        ]
+    )
 else:
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler("app.log", mode="w"),
+            logging.StreamHandler()
+        ]
+    )
 
 load_dotenv()
 
@@ -243,7 +255,7 @@ def record_portfolio_value(api: tradeapi.REST):
         sp500_close = get_index_close("^GSPC")
 
         entry = {
-            'timestamp': timestamp,
+            'date': timestamp,
             'portfolio_value': total_value,
             'nasdaq_close': nasdaq_close,
             'sp500_close': sp500_close
@@ -252,7 +264,7 @@ def record_portfolio_value(api: tradeapi.REST):
         with portfolio_history_lock:
             # Keep only one entry per 5-minute interval
             if len(portfolio_history) == 0 or \
-               (now_et - datetime.datetime.fromisoformat(portfolio_history[-1]['timestamp'])).seconds >= 300:
+               (now_et - datetime.datetime.fromisoformat(portfolio_history[-1]['date'])).seconds >= 300:
                 portfolio_history.append(entry)
                 logging.info(f"Recorded portfolio value: {entry}")
                 save_data()
@@ -313,7 +325,7 @@ def get_current_position(api: tradeapi.REST, symbol: str):
         logging.debug(f"No current position for {symbol}.")
         return None
 
-def submit_order(api: tradeapi.REST, symbol: str, qty: int, side: str, order_type: str = 'market', time_in_force: str = 'gtc'):
+def submit_order(api: tradeapi.REST, symbol: str, qty: int, side: str, order_type: str = 'market', time_in_force: str = 'day'):
     try:
         order = api.submit_order(symbol=symbol, qty=qty, side=side,
                                  type=order_type, time_in_force=time_in_force)
@@ -786,29 +798,35 @@ def dashboard():
 
     performance_data = []
     if history:
-        # Find first valid baseline with all data points
         baseline = next((
             item for item in history 
-            if item['nasdaq_close'] is not None 
-            and item['sp500_close'] is not None
-            and item['nasdaq_close'] > 0
-            and item['sp500_close'] > 0
+            if item.get('nasdaq_close', 0) and 
+            item.get('sp500_close', 0)
         ), None)
 
         if baseline:
             for entry in history:
-                if entry['nasdaq_close'] and entry['sp500_close']:
-                    norm_portfolio = (entry['portfolio_value'] / baseline['portfolio_value']) * 100
-                    norm_nasdaq = (entry['nasdaq_close'] / baseline['nasdaq_close']) * 100
-                    norm_sp500 = (entry['sp500_close'] / baseline['sp500_close']) * 100
-                    
+                # Handle both date formats
+                if 'timestamp' in entry:
                     dt = datetime.datetime.fromisoformat(entry['timestamp'])
-                    performance_data.append({
-                        'time': dt.strftime("%m-%d %H:%M"),
-                        'portfolio': round(norm_portfolio, 2),
-                        'nasdaq': round(norm_nasdaq, 2),
-                        'sp500': round(norm_sp500, 2)
-                    })
+                    display_time = dt.strftime("%m-%d %H:%M")
+                else:
+                    dt = datetime.datetime.strptime(entry['date'], "%Y-%m-%d")
+                    display_time = dt.strftime("%m-%d 00:00")  # Midnight for old entries
+
+                # Normalization logic
+                norm_portfolio = (entry['portfolio_value'] / baseline['portfolio_value']) * 100
+                norm_nasdaq = (entry['nasdaq_close'] / baseline['nasdaq_close']) * 100
+                norm_sp500 = (entry['sp500_close'] / baseline['sp500_close']) * 100
+                
+                performance_data.append({
+                    'time': display_time,
+                    'portfolio': round(norm_portfolio, 2),
+                    'nasdaq': round(norm_nasdaq, 2),
+                    'sp500': round(norm_sp500, 2)
+                })
+
+    logging.debug("performance_data=%s", performance_data)
     return render_template('index.html',
                            params=current_params,
                            signals=current_signals,
