@@ -811,7 +811,7 @@ def dashboard():
                     dt = datetime.datetime.fromisoformat(entry['timestamp'])
                     display_time = dt.strftime("%m-%d %H:%M")
                 else:
-                    dt = datetime.datetime.strptime(entry['date'], "%Y-%m-%d")
+                    dt = datetime.datetime.strptime(entry['date'], "%Y-%m-%dT%H:%M:%S.%f%z")
                     display_time = dt.strftime("%m-%d 00:00")  # Midnight for old entries
 
                 # Normalization logic
