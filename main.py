@@ -762,12 +762,10 @@ def trading_loop():
     logging.info("Starting trading loop...")
     
     while True:
-        try:
-            # Always record portfolio value every 5 minutes
-            record_portfolio_value(api)
-            
+        try:       
             if is_market_open():
                 scan_and_trade(api)
+                record_portfolio_value(api)
             else:
                 # Handle end-of-day discovery once per day
                 now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
