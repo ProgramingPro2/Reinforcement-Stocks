@@ -67,7 +67,7 @@ A fully featured trading bot that uses reinforcement learning–inspired paramet
    Adjust the ORDER_AMOUNT (dollar amount per trade) and other strategy parameters in the data.json file or main.py as needed.
 
 ## Watchlist
-Create a stocks.json file in the working directory containing a list of stock tickers. For example:
+Create a stocks.json file in the working directory containing a list of stock tickers. The following characters are not valid, (){}[].,^$@! For example:
 
    ```json
     ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
