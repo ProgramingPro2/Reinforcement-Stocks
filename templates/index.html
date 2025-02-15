@@ -109,102 +109,118 @@
     </div>
     
 
-    <!-- Module Script that Imports Chart.js and Dependencies -->
     <script type="module">
-      import { Chart } from 'chart.js';
-      import { parse } from 'date-fns';
-      
-      // (Optional) Register a date adapter using date-fns functions if needed.
-      // Here we show how you might attach the parse function from date-fns.
-      Chart.register({
-          id: 'date-adapter',
-          beforeInit: function(chart) {
-              chart.options.scales.x.adapters = {
-                  date: { parse } // Now using the imported parse function
-              };
-          }
-      });
-      
-      // Replace this with your actual performance data.
-      // For example, if you're using a templating engine, ensure it outputs valid JSON.
-      const performanceData = [];  // <-- Use a valid array instead of a placeholder
-      
+      // Import Chart.js along with required components
+      import {
+        Chart,
+        TimeScale,
+        LinearScale,
+        LineController,
+        LineElement,
+        PointElement,
+        Tooltip,
+        Legend
+      } from 'chart.js';
+    
+      // Register the necessary components
+      Chart.register(
+        TimeScale,
+        LinearScale,
+        LineController,
+        LineElement,
+        PointElement,
+        Tooltip,
+        Legend
+      );
+    
+      // Import the enUS locale from date-fns using its full URL
+      import enUS from 'https://cdn.jsdelivr.net/npm/date-fns@2.30.0/esm/locale/en-US/index.js';
+      // Import the date-fns adapter for Chart.js
+      import 'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.esm.js';
+    
+      // Load the performance data passed from Flask
+      const performanceData = {{ performance_data | tojson }};
+      console.log("Original Data:", performanceData);
+    
+      // Transform the time string so that it includes the current year.
+      // For example, if your data's time is "02-14 00:00", this will become "2025-02-14 00:00".
+      const transformedData = performanceData.map(d => ({
+        ...d,
+        time: `${new Date().getFullYear()}-${d.time}`  // Adjust this if you want a specific year
+      }));
+      console.log("Transformed Data:", transformedData);
+    
       document.addEventListener('DOMContentLoaded', function() {
-          if (typeof Chart === 'undefined') {
-              console.error('Chart.js not loaded!');
-              return;
-          }
-          
-          const ctx = document.getElementById('performanceChart');
-      
-          if (!ctx) {
-              console.error('Chart canvas not found');
-              return;
-          }
-      
-          if (!performanceData.length) {
-              console.log('No performance data available');
-              return;
-          }
-      
-          try {
-            new Chart(ctx, {
-              type: 'line',
-              data: {
-                labels: performanceData.map(d => d.time),
-                datasets: [
-                  {
-                    label: 'Your Portfolio',
-                    data: performanceData.map(d => ({ x: d.time, y: d.portfolio })),
-                    borderColor: '#3e95cd',
-                    fill: false
+        const ctx = document.getElementById('performanceChart');
+        if (!ctx) {
+          console.error('Chart canvas not found');
+          return;
+        }
+        if (!transformedData.length) {
+          console.log('No performance data available');
+          return;
+        }
+        try {
+          new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: transformedData.map(d => d.time),
+              datasets: [
+                {
+                  label: 'Your Portfolio',
+                  data: transformedData.map(d => ({ x: d.time, y: d.portfolio })),
+                  borderColor: '#3e95cd',
+                  fill: false
+                },
+                {
+                  label: 'NASDAQ',
+                  data: transformedData.map(d => ({ x: d.time, y: d.nasdaq })),
+                  borderColor: '#8e5ea2',
+                  fill: false
+                },
+                {
+                  label: 'S&P 500',
+                  data: transformedData.map(d => ({ x: d.time, y: d.sp500 })),
+                  borderColor: '#3cba9f',
+                  fill: false
+                }
+              ]
+            },
+            options: {
+              scales: {
+                x: {
+                  type: 'time',
+                  time: {
+                    // Use the full year in the parser format so that the date adapter can parse it correctly
+                    parser: 'yyyy-MM-dd HH:mm',
+                    tooltipFormat: 'MMM dd HH:mm',
+                    unit: 'hour',
+                    displayFormats: {
+                      hour: 'MMM dd HH:mm'
+                    }
                   },
-                  {
-                    label: 'NASDAQ',
-                    data: performanceData.map(d => ({ x: d.time, y: d.nasdaq })),
-                    borderColor: '#8e5ea2',
-                    fill: false
-                  },
-                  {
-                    label: 'S&P 500',
-                    data: performanceData.map(d => ({ x: d.time, y: d.sp500 })),
-                    borderColor: '#3cba9f',
-                    fill: false
+                  adapters: {
+                    date: {
+                      locale: enUS
+                    }
                   }
-                ]
-              },
-              options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                  x: {
-                    type: 'time',
-                    time: {
-                      parser: 'MM-dd HH:mm',
-                      tooltipFormat: 'MMM dd HH:mm',
-                      unit: 'hour',
-                      displayFormats: {
-                        hour: 'MMM dd HH:mm'
-                      }
-                    },
-                    adapters: {
-                      date: { locale: 'en-US' }
-                    }
-                  },
-                  y: {
-                    title: {
-                      display: true,
-                      text: 'Normalized Performance (%)'
-                    }
+                },
+                y: {
+                  title: {
+                    display: true,
+                    text: 'Normalized Performance (%)'
                   }
                 }
               }
-            });
-          } catch (error) {
-            console.error('Chart initialization failed:', error);
-          }
+            }
+          });
+        } catch (error) {
+          console.error('Chart initialization failed:', error);
+        }
       });
     </script>
+    
+    
     
     <!-- Strategy Parameters Card -->
     <div class="card">

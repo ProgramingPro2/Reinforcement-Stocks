@@ -266,7 +266,7 @@ def record_portfolio_value(api: tradeapi.REST):
             if len(portfolio_history) == 0 or \
                (now_et - datetime.datetime.fromisoformat(portfolio_history[-1]['date'])).seconds >= 300:
                 portfolio_history.append(entry)
-                logging.info(f"Recorded portfolio value: {entry}")
+                logging.info(f"Recorded portfolio value: {entry} at time {now_et}")
                 save_data()
     except Exception as e:
         logging.error(f"Error recording portfolio value: {e}")
@@ -336,9 +336,15 @@ def submit_order(api: tradeapi.REST, symbol: str, qty: int, side: str, order_typ
         return None
     
 def liquidate_all_positions(api: tradeapi.REST):
-    positions = api.list_positions()
-    for pos in positions:
-        submit_order(api, pos.symbol, pos.qty, 'sell')
+    try:
+        positions = api.list_positions()
+        i = 0
+        for pos in positions:
+            submit_order(api, pos.symbol, pos.qty, 'sell')
+            i += 1
+        logging.info(f"End of the day liquidated: {i} positions")
+    except Exception as e:
+        logging.error(f"Liquidation failed: {e}")
 
 def calculate_order_quantity(price: float, order_amount: float) -> int:
     qty = max(0.01, round(float(order_amount / price), 2))
@@ -801,18 +807,19 @@ def dashboard():
         baseline = next((
             item for item in history 
             if item.get('nasdaq_close', 0) and 
-            item.get('sp500_close', 0)
+               item.get('sp500_close', 0)
         ), None)
 
         if baseline:
             for entry in history:
-                # Handle both date formats
-                if 'timestamp' in entry:
-                    dt = datetime.datetime.fromisoformat(entry['timestamp'])
+                # Use 'timestamp' if available, otherwise fall back to 'date'
+                ts = entry.get('timestamp', entry.get('date'))
+                try:
+                    dt = datetime.datetime.fromisoformat(ts)
                     display_time = dt.strftime("%m-%d %H:%M")
-                else:
-                    dt = datetime.datetime.strptime(entry['date'], "%Y-%m-%dT%H:%M:%S.%f%z")
-                    display_time = dt.strftime("%m-%d 00:00")  # Midnight for old entries
+                except Exception as e:
+                    logging.error(f"Error parsing timestamp {ts}: {e}")
+                    display_time = "Invalid Time"
 
                 # Normalization logic
                 norm_portfolio = (entry['portfolio_value'] / baseline['portfolio_value']) * 100
@@ -826,13 +833,13 @@ def dashboard():
                     'sp500': round(norm_sp500, 2)
                 })
 
-    logging.debug("performance_data=%s", performance_data)
     return render_template('index.html',
                            params=current_params,
                            signals=current_signals,
                            trade_log=trades,
                            performance_data=performance_data,
                            check_interval=CHECK_INTERVAL)
+
 
 
 @app.route('/api/status')
