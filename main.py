@@ -1194,7 +1194,6 @@ def tuning_loop():
             with trade_log_lock:
                 current_reward = cumulative_reward
                 logging.debug("Current cumulative reward: {current_reward:.2f}")
-                logging.debug("Current cumulative reward: {current_reward:.2f}")
             # Compute reward as the change in cumulative reward over the interval.
             reward = current_reward - previous_cumulative_reward
             # Determine new state: 1 if positive reward, -1 if negative, 0 if no change.
