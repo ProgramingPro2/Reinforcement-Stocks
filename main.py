@@ -869,29 +869,11 @@ previous_state = 0  # State can be -1, 0, or 1 representing performance trend.
 NUM_ACTIONS = 56  # Define number of discrete actions.
 
 class ParameterTuningAgent:
-    def __init__(self, alpha=0.1, gamma=0.9, epsilon=0.2):
+    def __init__(self, alpha=0.2, gamma=0.9, epsilon=0.3):
         self.alpha = alpha      # Learning rate
         self.gamma = gamma      # Discount factor
         self.epsilon = epsilon  # Exploration rate
         self.q_table = {}       # Q-table mapping state -> list of Q-values for each action
-    # New: Save the Q-table to disk
-    def save_q_table(self, filepath):
-        try:
-            with open(filepath, "w") as f:
-                json.dump(self.q_table, f, indent=4)
-            logging.debug(f"RL Q-table saved to {filepath}")
-        except Exception as e:
-            logging.error(f"Failed to save RL Q-table: {e}")
-
-    # New: Load the Q-table from disk
-    def load_q_table(self, filepath):
-        try:
-            if os.path.exists(filepath):
-                with open(filepath, "r") as f:
-                    self.q_table = json.load(f)
-                logging.debug(f"RL Q-table loaded from {filepath}")
-        except Exception as e:
-            logging.error(f"Failed to load RL Q-table: {e}")
 
     def get_q_values(self, state):
         if state not in self.q_table:
@@ -1187,8 +1169,12 @@ def apply_rl_action(action):
             logging.debug("RL Action: Decreased STOCH_OVERBOUGHT")
         else:
             logging.debug("RL Action: No change")
+        # Re-normalize weights so that they sum to 1.
+        total = strategy_params['RSI_WEIGHT'] + strategy_params['MACD_WEIGHT'] + strategy_params['SMA_WEIGHT']
+        strategy_params['RSI_WEIGHT'] /= total
+        strategy_params['MACD_WEIGHT'] /= total
+        strategy_params['SMA_WEIGHT'] /= total
 
-rl_agent = ParameterTuningAgent()
 def tuning_loop():
     """
     RL-based tuning loop:
@@ -1202,21 +1188,22 @@ def tuning_loop():
     global previous_cumulative_reward, previous_state
     previous_cumulative_reward = cumulative_reward
     previous_state = 0  # initial state: neutral
-    # Define path to persist RL Q-values.
-    rl_qtable_path = os.path.join(working_dir, "rl_qvalues.json")
     while True:
         try:
             time.sleep(TUNE_INTERVAL)
             with trade_log_lock:
                 current_reward = cumulative_reward
+                logging.debug("Current cumulative reward: {current_reward:.2f}")
+            # Compute reward as the change in cumulative reward over the interval.
             reward = current_reward - previous_cumulative_reward
+            # Determine new state: 1 if positive reward, -1 if negative, 0 if no change.
             new_state = 1 if reward > 0 else (-1 if reward < 0 else 0)
+            # RL agent chooses an action based on the previous state.
             action = rl_agent.choose_action(previous_state)
             apply_rl_action(action)
             update_strategy_params(strategy_params)
+            # Update Q-values for the RL agent.
             rl_agent.update(previous_state, action, reward, new_state)
-            # New: Save the updated Q-table after each tuning step.
-            rl_agent.save_q_table(rl_qtable_path)
             logging.info("RL tuning: prev_state=%s, action=%s, reward=%.2f, new_state=%s", previous_state, action, reward, new_state)
             previous_state = new_state
             previous_cumulative_reward = current_reward
@@ -1386,9 +1373,6 @@ def api_status():
 def main():
     api = tradeapi.REST(API_KEY, API_SECRET, BASE_URL, api_version='v2')
     update_held_positions(api)
-    # New: Load RL Q-table from file at startup.
-    rl_qtable_path = os.path.join(working_dir, "rl_qvalues.json")
-    rl_agent.load_q_table(rl_qtable_path)
     trading_thread = threading.Thread(target=trading_loop, daemon=True)
     tuning_thread = threading.Thread(target=tuning_loop, daemon=True)
     trading_thread.start()
