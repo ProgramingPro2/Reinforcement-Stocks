@@ -1377,9 +1377,9 @@ def main():
     tuning_thread = threading.Thread(target=tuning_loop, daemon=True)
     trading_thread.start()
     tuning_thread.start()
-    logging.info("Starting Flask dashboard on http://0.0.0.0:5001")
+    logging.info("Starting Flask dashboard on http://0.0.0.0:5000")
     # Disable Flask's auto-reloader to prevent duplicate threads in debug mode.
-    app.run(host='0.0.0.0', port=5001, debug=DEBUG, use_reloader=False)
+    app.run(host='0.0.0.0', port=5000, debug=DEBUG, use_reloader=False)
 
 if __name__ == '__main__':
     main()
