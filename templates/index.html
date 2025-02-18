@@ -263,6 +263,11 @@
                 <th>RSI</th>
                 <th>MACD</th>
                 <th>SMA</th>
+                <th>STOCH</th>
+                <th>BOLLINGER</th>
+                <th>OBV</th>
+                <th>ADX</th>
+                <th>CCI</th>
                 <th>Composite</th>
                 <th>Signal</th>
                 <th>Timestamp</th>
@@ -275,6 +280,11 @@
                 <td>{{ info['RSI'] if info['RSI'] is not none else 'N/A' }}</td>
                 <td>{{ info['MACD'] if info['MACD'] is not none else 'N/A' }}</td>
                 <td>{{ info['SMA'] if info['SMA'] is not none else 'N/A' }}</td>
+                <td>{{ info['STOCH'] if info['STOCH'] is not none else 'N/A' }}</td>
+                <td>{{ info['BOLLINGER'] if info['BOLLINGER'] is not none else 'N/A' }}</td>
+                <td>{{ info['OBV'] if info['OBV'] is not none else 'N/A' }}</td>
+                <td>{{ info['ADX'] if info['ADX'] is not none else 'N/A' }}</td>
+                <td>{{ info['CCI'] if info['CCI'] is not none else 'N/A' }}</td>
                 <td>{{ info['composite'] if info['composite'] is not none else 'N/A' }}</td>
                 <td>{{ info['signal'] }}</td>
                 <td>{{ info['timestamp'] }}</td>

@@ -93,10 +93,27 @@ default_params = {
     'MACD_SLOW': 26,
     'MACD_SIGNAL': 9,
     'SMA_PERIOD': 30,
+    'STOCH_K_PERIOD': 14,
+    'STOCH_D_PERIOD': 3,
+    'STOCH_OVERSOLD': 20,
+    'STOCH_OVERBOUGHT': 80,
+    'BOLLINGER_PERIOD': 20,
+    'BOLLINGER_STD_DEV': 2,
+    'OBV_SLOPE_PERIOD': 5,
+    'ADX_PERIOD': 14,
+    'ADX_THRESHOLD': 25,
+    'CCI_PERIOD': 20,
+    'CCI_OVERSOLD': -100,
+    'CCI_OVERBOUGHT': 100,
     # Weights for the composite signal (roughly summing to 1)
-    'RSI_WEIGHT': 0.34,
-    'MACD_WEIGHT': 0.33,
-    'SMA_WEIGHT': 0.33,
+    'RSI_WEIGHT': 0.125,
+    'MACD_WEIGHT': 0.125,
+    'SMA_WEIGHT': 0.125,
+    'STOCH_WEIGHT': 0.125,
+    'BOLLINGER_WEIGHT': 0.125,
+    'OBV_WEIGHT': 0.125,
+    'ADX_WEIGHT': 0.125,
+    'CCI_WEIGHT': 0.125,
     # Composite signal decision thresholds:
     'BUY_THRESHOLD': 0.5,
     'SELL_THRESHOLD': -0.5,
@@ -223,8 +240,124 @@ def update_strategy_params(new_params):
 load_data()
 
 # ==============================
-# HELPER FUNCTIONS & INDICATORS
+# INDICATORS CALCULATIONS
 # ==============================
+
+def calculate_rsi(prices: pd.Series, period: int) -> pd.Series:
+    logging.debug("Calculating RSI...")
+    delta = prices.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(window=period, min_periods=period).mean()
+    avg_loss = loss.rolling(window=period, min_periods=period).mean()
+    rs = avg_gain / (avg_loss + 1e-10)
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calculate_macd(prices: pd.Series, fast: int, slow: int, signal: int):
+    logging.debug("Calculating MACD...")
+    ema_fast = prices.ewm(span=fast, adjust=False).mean()
+    ema_slow = prices.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    return macd_line, signal_line
+
+def calculate_sma(prices: pd.Series, period: int):
+    logging.debug("Calculating SMA...")
+    return prices.rolling(window=period).mean()
+
+def calculate_stochastic(high: pd.Series, low: pd.Series, close: pd.Series, 
+                        k_period: int, d_period: int) -> tuple:
+    """Calculate Stochastic Oscillator %K and %D"""
+    logging.debug("Calculating Stoch...")
+    lowest_low = low.rolling(k_period).min()
+    highest_high = high.rolling(k_period).max()
+    k = 100 * ((close - lowest_low) / (highest_high - lowest_low + 1e-10))
+    d = k.rolling(d_period).mean()
+    return k, d
+
+def calculate_bollinger_bands(price: pd.Series, period: int, 
+                             std_dev: float) -> tuple:
+    """Calculate Bollinger Bands"""
+    logging.debug("Calculating Bollinger Bands...")
+    sma = price.rolling(period).mean()
+    std = price.rolling(period).std()
+    return (sma + std_dev * std, sma - std_dev * std)
+
+def calculate_obv(close: pd.Series, volume) -> pd.Series:
+    logging.debug("Calculating OBV...")
+    # Ensure close is a Series (in case it's a one-column DataFrame)
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+    if isinstance(volume, pd.DataFrame):
+        volume = volume.iloc[:, 0]
+
+    diff = close.diff()
+    # Now diff is a Series and the lambda will get a scalar at each element.
+    direction = diff.apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+    
+    obv = pd.Series(0, index=close.index, dtype=float)
+    obv.iloc[1:] = np.where(direction.iloc[1:] > 0, volume.iloc[1:],
+                     np.where(direction.iloc[1:] < 0, -volume.iloc[1:], 0))
+    return obv
+
+def calculate_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int) -> pd.Series:
+    """Calculate Average Directional Index"""
+    logging.debug("Calculating ADX...")
+
+    # Ensure inputs are 1D Series
+    if isinstance(high, pd.DataFrame):
+        high = high.iloc[:, 0]
+    if isinstance(low, pd.DataFrame):
+        low = low.iloc[:, 0]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+
+    up = high.diff()
+    down = -low.diff()
+    
+    # Convert np.where results into a 1D Series
+    plus_dm = pd.Series(np.where((up > down) & (up > 0), up, 0).flatten(), index=up.index)
+    minus_dm = pd.Series(np.where((down > up) & (down > 0), down, 0).flatten(), index=up.index)
+    
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low - close.shift()).abs()
+    ], axis=1).max(axis=1)
+    
+    atr = tr.rolling(period).mean()
+    plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
+    minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-10)
+    return dx.rolling(period).mean()
+
+def calculate_cci(high: pd.Series, low: pd.Series, close: pd.Series, 
+                 period: int) -> pd.Series:
+    """Calculate Commodity Channel Index"""
+    logging.debug("Calculating CCI...")
+    tp = (high + low + close) / 3
+    sma = tp.rolling(period).mean()
+    mad = tp.rolling(period).apply(lambda x: np.mean(np.abs(x - x.mean())))
+    return (tp - sma) / (0.015 * mad + 1e-10)
+
+
+# ==============================
+# HELPER FUNCTIONS
+# ==============================
+
+def extract_scalar(val):
+    """
+    Convert a pandas or numpy scalar (or one‐element array/Series) to a float.
+    """
+    # If it's a pandas Series or a numpy array with a single element, use .item()
+    if isinstance(val, (pd.Series, np.ndarray)):
+        try:
+            return float(val.item())
+        except Exception as e:
+            logging.error(f"Error extracting scalar using .item(): {e}")
+    return float(val)
+
 
 def record_portfolio_value(api: tradeapi.REST):
     """Records portfolio and index values every 5 minutes"""
@@ -271,29 +404,6 @@ def record_portfolio_value(api: tradeapi.REST):
     except Exception as e:
         logging.error(f"Error recording portfolio value: {e}")
 
-def calculate_rsi(prices: pd.Series, period: int) -> pd.Series:
-    logging.debug("Calculating RSI...")
-    delta = prices.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(window=period, min_periods=period).mean()
-    avg_loss = loss.rolling(window=period, min_periods=period).mean()
-    rs = avg_gain / (avg_loss + 1e-10)
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
-
-def calculate_macd(prices: pd.Series, fast: int, slow: int, signal: int):
-    logging.debug("Calculating MACD...")
-    ema_fast = prices.ewm(span=fast, adjust=False).mean()
-    ema_slow = prices.ewm(span=slow, adjust=False).mean()
-    macd_line = ema_fast - ema_slow
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    return macd_line, signal_line
-
-def calculate_sma(prices: pd.Series, period: int):
-    logging.debug("Calculating SMA...")
-    return prices.rolling(window=period).mean()
-
 def get_historical_data(api: tradeapi.REST, symbol: str, days: int, timeframe: str) -> pd.DataFrame:
     """
     Retrieves historical data using yfinance (free and near-real-time) instead of Alpaca's API.
@@ -308,7 +418,7 @@ def get_historical_data(api: tradeapi.REST, symbol: str, days: int, timeframe: s
         if data.empty:
             logging.debug(f"No data returned for {symbol} from yfinance.")
             return pd.DataFrame()
-        data = data.rename(columns={'Close': 'close'})
+        data = data.rename(columns={'Close': 'close', 'High': 'high', 'Low': 'low', 'Volume': 'volume'})
         data = data.sort_index()
         logging.debug(f"Historical data retrieved for {symbol} from yfinance.")
         return data
@@ -378,36 +488,126 @@ def compute_composite_signal(symbol: str, api: tradeapi.REST) -> float:
     if bars.empty or 'close' not in bars:
         logging.debug(f"Insufficient data for {symbol}. Returning composite signal 0.0.")
         return 0.0
-    close_prices = bars['close']
-    current_price = float(close_prices.iloc[-1].squeeze())
+    
+    close = bars['close']
+    high = bars['high']
+    low = bars['low']
+    volume = bars['volume'] if 'volume' in bars else pd.Series(0, index=bars.index)
+    current_price = float(close.iloc[-1].squeeze())
+
     with params_lock:
+        #RSI
         rsi_period     = strategy_params['RSI_PERIOD']
         rsi_oversold   = strategy_params['RSI_OVERSOLD']
         rsi_overbought = strategy_params['RSI_OVERBOUGHT']
+
+        #MACD
         macd_fast      = strategy_params['MACD_FAST']
         macd_slow      = strategy_params['MACD_SLOW']
         macd_signal_period = strategy_params['MACD_SIGNAL']
+
+        #SMA
         sma_period     = strategy_params['SMA_PERIOD']
+
+        #STOCH
+        stoch_k_period = strategy_params['STOCH_K_PERIOD']
+        stoch_d_period = strategy_params['STOCH_D_PERIOD']
+        stoch_oversold = strategy_params['STOCH_OVERSOLD']
+        stoch_overbought = strategy_params['STOCH_OVERBOUGHT']
+
+        #BOLLINGER
+        bollinger_period = strategy_params['BOLLINGER_PERIOD']
+        bollinger_std_dev = strategy_params['BOLLINGER_STD_DEV']
+
+        #OBV
+        obv_slope_period = strategy_params['OBV_SLOPE_PERIOD']
+
+        #ADX
+        adx_period = strategy_params['ADX_PERIOD']
+        adx_threshold = strategy_params['ADX_THRESHOLD']
+
+        #CCI
+        cci_period = strategy_params['CCI_PERIOD']
+        cci_oversold = strategy_params['CCI_OVERSOLD']
+        cci_overbought = strategy_params['CCI_OVERBOUGHT']
+
+        #WEIGHTS
         rsi_weight     = strategy_params['RSI_WEIGHT']
         macd_weight    = strategy_params['MACD_WEIGHT']
         sma_weight     = strategy_params['SMA_WEIGHT']
-    rsi_series = calculate_rsi(close_prices, rsi_period)
+        stoch_weight   = strategy_params['STOCH_WEIGHT']
+        bollinger_weight = strategy_params['BOLLINGER_WEIGHT']
+        obv_weight = strategy_params['OBV_WEIGHT']
+        adx_weight = strategy_params['ADX_WEIGHT']
+        cci_weight = strategy_params['CCI_WEIGHT']
+
+    #RSI
+    rsi_series = calculate_rsi(close, rsi_period)
     if rsi_series.empty or pd.isna(rsi_series.iloc[-1].squeeze()):
         rsi_signal = 0
     else:
         current_rsi = float(rsi_series.iloc[-1].squeeze())
         rsi_signal = 1 if current_rsi < rsi_oversold else (-1 if current_rsi > rsi_overbought else 0)
-    macd_line, signal_line = calculate_macd(close_prices, macd_fast, macd_slow, macd_signal_period)
+    
+    #MACD
+    macd_line, signal_line = calculate_macd(close, macd_fast, macd_slow, macd_signal_period)
     macd_signal = 1 if float(macd_line.iloc[-1].squeeze()) > float(signal_line.iloc[-1].squeeze()) else -1
-    sma_series = calculate_sma(close_prices, sma_period)
+    
+    #SMA
+    sma_series = calculate_sma(close, sma_period)
     if sma_series.empty or pd.isna(sma_series.iloc[-1].squeeze()):
         sma_signal = 0
     else:
         sma_value = float(sma_series.iloc[-1].squeeze())
         sma_signal = 1 if current_price > sma_value else -1
+
+    #STOCH
+    stoch_k, stoch_d = calculate_stochastic(high, low, close, stoch_k_period, stoch_d_period)
+    if stoch_k.empty or pd.isna(stoch_k.iloc[-1].squeeze()) or stoch_d.empty or pd.isna(stoch_d.iloc[-1].squeeze()):
+        stoch_signal = 0
+    else:
+        stoch_k_value = float(stoch_k.iloc[-1].squeeze())
+        stoch_d_value = float(stoch_d.iloc[-1].squeeze())
+        stoch_signal = 1 if stoch_k_value > stoch_d_value else -1
+
+    #BOLLINGER
+    upper_band, lower_band = calculate_bollinger_bands(close, bollinger_period, bollinger_std_dev)
+    if upper_band.empty or pd.isna(upper_band.iloc[-1].squeeze()) or lower_band.empty or pd.isna(lower_band.iloc[-1].squeeze()):
+        bollinger_signal = 0
+    else:
+        bollinger_signal = 1 if current_price > upper_band.iloc[-1].squeeze() else -1
+
+    #OBV
+    obv = calculate_obv(close, volume)
+    if obv.empty or pd.isna(obv.iloc[-1].squeeze()):
+        obv_signal = 0
+    else:
+        obv_signal = 1 if float(obv.iloc[-1].squeeze()) > 0 else -1
+
+    #ADX
+    adx = calculate_adx(high, low, close, adx_period)
+    if adx.empty or pd.isna(adx.iloc[-1].squeeze()):
+        adx_signal = 0
+    else:
+        adx_signal = 1 if float(adx.iloc[-1].squeeze()) > adx_threshold else -1
+
+    #CCI
+    cci = calculate_cci(high, low, close, cci_period)
+    if cci.empty or pd.isna(cci.iloc[-1].squeeze()):
+        cci_signal = 0
+    else:
+        cci_signal = 1 if float(cci.iloc[-1].squeeze()) < cci_oversold else (-1 if float(cci.iloc[-1].squeeze()) > cci_overbought else 0)
+
+
+    #COMPOSITE
     composite_signal = (rsi_weight * rsi_signal +
                         macd_weight * macd_signal +
-                        sma_weight * sma_signal)
+                        sma_weight * sma_signal +
+                        stoch_weight * stoch_signal +
+                        bollinger_weight * bollinger_signal +
+                        obv_weight * obv_signal +
+                        adx_weight * adx_signal +
+                        cci_weight * cci_signal)
     logging.debug(f"{symbol} composite signal computed as {composite_signal:.2f}")
     return composite_signal
 
@@ -430,21 +630,60 @@ def scan_and_trade(api: tradeapi.REST):
             continue
 
         close_prices = bars['close']
+        close = bars['close']
+        high = bars['high']
+        low = bars['low']
+        volume = bars['volume'] if 'volume' in bars else pd.Series(0, index=bars.index)
         current_price = float(close_prices.iloc[-1].squeeze())
         with params_lock:
+            #RSI
             rsi_period     = strategy_params['RSI_PERIOD']
             rsi_oversold   = strategy_params['RSI_OVERSOLD']
             rsi_overbought = strategy_params['RSI_OVERBOUGHT']
-            order_amount   = strategy_params['ORDER_AMOUNT']
+
+            #MACD
             macd_fast      = strategy_params['MACD_FAST']
             macd_slow      = strategy_params['MACD_SLOW']
             macd_signal_period = strategy_params['MACD_SIGNAL']
+
+            #SMA
             sma_period     = strategy_params['SMA_PERIOD']
+
+            #STOCH
+            stoch_k_period = strategy_params['STOCH_K_PERIOD']
+            stoch_d_period = strategy_params['STOCH_D_PERIOD']
+            stoch_oversold = strategy_params['STOCH_OVERSOLD']
+            stoch_overbought = strategy_params['STOCH_OVERBOUGHT']
+
+            #BOLLINGER
+            bollinger_period = strategy_params['BOLLINGER_PERIOD']
+            bollinger_std_dev = strategy_params['BOLLINGER_STD_DEV']
+
+            #OBV
+            obv_slope_period = strategy_params['OBV_SLOPE_PERIOD']
+
+            #ADX
+            adx_period = strategy_params['ADX_PERIOD']
+            adx_threshold = strategy_params['ADX_THRESHOLD']
+
+            #CCI
+            cci_period = strategy_params['CCI_PERIOD']
+            cci_oversold = strategy_params['CCI_OVERSOLD']
+            cci_overbought = strategy_params['CCI_OVERBOUGHT']
+
+            #WEIGHTS
             rsi_weight     = strategy_params['RSI_WEIGHT']
             macd_weight    = strategy_params['MACD_WEIGHT']
             sma_weight     = strategy_params['SMA_WEIGHT']
+            stoch_weight   = strategy_params['STOCH_WEIGHT']
+            bollinger_weight = strategy_params['BOLLINGER_WEIGHT']
+            obv_weight = strategy_params['OBV_WEIGHT']
+            adx_weight = strategy_params['ADX_WEIGHT']
+            cci_weight = strategy_params['CCI_WEIGHT']
+
             buy_threshold  = strategy_params['BUY_THRESHOLD']
             sell_threshold = strategy_params['SELL_THRESHOLD']
+            order_amount  = strategy_params['ORDER_AMOUNT']
 
         # Calculate RSI signal.
         rsi_series = calculate_rsi(close_prices, rsi_period)
@@ -466,10 +705,57 @@ def scan_and_trade(api: tradeapi.REST):
         sma_value = float(sma_series.iloc[-1].squeeze())
         sma_signal = 1 if current_price > sma_value else -1
 
+        # Calculate STOCH signal.
+        stoch_k_series, stoch_d_series = calculate_stochastic(close_prices, high, low, stoch_k_period, stoch_d_period)
+        if (stoch_k_series.empty or pd.isna(stoch_k_series.iloc[-1].squeeze()) or
+            stoch_d_series.empty or pd.isna(stoch_d_series.iloc[-1].squeeze())):
+            logging.debug(f"Insufficient data for STOCH calculation for {symbol}.")
+            continue
+
+        stoch_k_value = extract_scalar(stoch_k_series.iloc[-1])
+        stoch_d_value = extract_scalar(stoch_d_series.iloc[-1])
+        stoch_signal = 1 if stoch_k_value > stoch_d_value else -1
+
+        # Calculate BOLLINGER signal.
+        upper_band, lower_band = calculate_bollinger_bands(close_prices, bollinger_period, bollinger_std_dev)
+        if upper_band.empty or pd.isna(upper_band.iloc[-1].squeeze()) or lower_band.empty or pd.isna(lower_band.iloc[-1].squeeze()):
+            logging.debug(f"Insufficient data for BOLLINGER calculation for {symbol}.")
+            continue
+        bollinger_signal = 1 if current_price > upper_band.iloc[-1].squeeze() else -1
+
+        # Calculate OBV signal.
+        obv_series = calculate_obv(close_prices, volume)
+        if obv_series.empty or pd.isna(obv_series.iloc[-1].squeeze()):
+            logging.debug(f"Insufficient data for OBV calculation for {symbol}.")
+            continue
+        obv_value = float(obv_series.iloc[-1].squeeze())
+        obv_signal = 1 if obv_value > 0 else -1
+
+        # Calculate ADX signal.
+        adx_series = calculate_adx(high, low, close, adx_period)
+        if adx_series.empty or pd.isna(adx_series.iloc[-1].squeeze()):
+            logging.debug(f"Insufficient data for ADX calculation for {symbol}.")
+            continue
+        adx_value = float(adx_series.iloc[-1].squeeze())
+        adx_signal = 1 if adx_value > adx_threshold else -1
+
+        # Calculate CCI signal.
+        cci_series = calculate_cci(high, low, close, cci_period)
+        if cci_series.empty or pd.isna(cci_series.iloc[-1].squeeze()):
+            logging.debug(f"Insufficient data for CCI calculation for {symbol}.")
+            continue
+        cci_value = float(cci_series.iloc[-1].squeeze())
+        cci_signal = 1 if cci_value < cci_oversold else (-1 if cci_value > cci_overbought else 0)
+
         composite_signal = (rsi_weight * rsi_signal +
                             macd_weight * macd_signal +
-                            sma_weight * sma_signal)
-        logging.debug(f"{symbol}: RSI={current_rsi:.2f} (sig {rsi_signal}), MACD signal={macd_signal}, SMA value={sma_value:.2f} (sig {sma_signal})")
+                            sma_weight * sma_signal +
+                            stoch_weight * stoch_signal +
+                            bollinger_weight * bollinger_signal +
+                            obv_weight * obv_signal +
+                            adx_weight * adx_signal +
+                            cci_weight * cci_signal)
+        logging.debug(f"{symbol}: RSI={current_rsi:.2f} (sig {rsi_signal}), MACD signal={macd_signal}, SMA value={sma_value:.2f} (sig {sma_signal}), STOCH signal={stoch_signal}, BOLLINGER signal={bollinger_signal}, OBV signal={obv_signal}, ADX signal={adx_signal}, CCI signal={cci_signal}")
         logging.debug(f"{symbol}: Composite signal (weighted): {composite_signal:.2f}")
 
         position = get_current_position(api, symbol)
@@ -504,6 +790,11 @@ def scan_and_trade(api: tradeapi.REST):
                 'RSI': round(current_rsi, 2),
                 'MACD': macd_signal,
                 'SMA': sma_signal,
+                'STOCH': stoch_signal,
+                'BOLLINGER': bollinger_signal,
+                'OBV': obv_signal,
+                'ADX': adx_signal,
+                'CCI': cci_signal,
                 'composite': round(composite_signal, 2),
                 'signal': decision,
                 'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -551,6 +842,11 @@ def update_held_positions(api: tradeapi.REST):
                     'RSI': None,
                     'MACD': None,
                     'SMA': None,
+                    'STOCH': None,
+                    'BOLLINGER': None,
+                    'OBV': None,
+                    'ADX': None,
+                    'CCI': None,
                     'composite': None,
                     'signal': f'held ({pos.qty} shares)',
                     'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -570,7 +866,7 @@ open_positions_rl = {}  # For matching buys and sells for RL reward calculation.
 previous_cumulative_reward = 0.0  # Used to compute reward over tuning intervals.
 previous_state = 0  # State can be -1, 0, or 1 representing performance trend.
 
-NUM_ACTIONS = 11  # Define number of discrete actions.
+NUM_ACTIONS = 56  # Define number of discrete actions.
 
 class ParameterTuningAgent:
     def __init__(self, alpha=0.1, gamma=0.9, epsilon=0.2):
@@ -578,6 +874,24 @@ class ParameterTuningAgent:
         self.gamma = gamma      # Discount factor
         self.epsilon = epsilon  # Exploration rate
         self.q_table = {}       # Q-table mapping state -> list of Q-values for each action
+    # New: Save the Q-table to disk
+    def save_q_table(self, filepath):
+        try:
+            with open(filepath, "w") as f:
+                json.dump(self.q_table, f, indent=4)
+            logging.debug(f"RL Q-table saved to {filepath}")
+        except Exception as e:
+            logging.error(f"Failed to save RL Q-table: {e}")
+
+    # New: Load the Q-table from disk
+    def load_q_table(self, filepath):
+        try:
+            if os.path.exists(filepath):
+                with open(filepath, "r") as f:
+                    self.q_table = json.load(f)
+                logging.debug(f"RL Q-table loaded from {filepath}")
+        except Exception as e:
+            logging.error(f"Failed to load RL Q-table: {e}")
 
     def get_q_values(self, state):
         if state not in self.q_table:
@@ -612,21 +926,70 @@ rl_agent = ParameterTuningAgent()
 def apply_rl_action(action):
     """
     Applies a discrete action to adjust strategy parameters.
+    
     Actions:
       0: Increase RSI_OVERSOLD by 0.5 (max 40)
       1: Decrease RSI_OVERSOLD by 0.5 (min 20)
       2: Increase RSI_OVERBOUGHT by 0.5 (max 80)
       3: Decrease RSI_OVERBOUGHT by 0.5 (min 60)
+      
       4: Increase RSI_WEIGHT by 0.01
-      5: Decrease RSI_WEIGHT by 0.01
+      5: Decrease RSI_WEIGHT by 0.01 (min 0.1)
       6: Increase MACD_WEIGHT by 0.01
-      7: Decrease MACD_WEIGHT by 0.01
+      7: Decrease MACD_WEIGHT by 0.01 (min 0.1)
       8: Increase SMA_WEIGHT by 0.01
-      9: Decrease SMA_WEIGHT by 0.01
-      10: Do nothing
-    After weight adjustments, re-normalize weights.
+      9: Decrease SMA_WEIGHT by 0.01 (min 0.1)
+      10: Increase STOCH_WEIGHT by 0.01
+      11: Decrease STOCH_WEIGHT by 0.01 (min 0.1)
+      12: Increase BOLLINGER_WEIGHT by 0.01
+      13: Decrease BOLLINGER_WEIGHT by 0.01 (min 0.1)
+      14: Increase OBV_WEIGHT by 0.01
+      15: Decrease OBV_WEIGHT by 0.01 (min 0.1)
+      16: Increase ADX_WEIGHT by 0.01
+      17: Decrease ADX_WEIGHT by 0.01 (min 0.1)
+      18: Increase CCI_WEIGHT by 0.01
+      19: Decrease CCI_WEIGHT by 0.01 (min 0.1)
+      
+      20: Increase STOCH_K_PERIOD by 1 (max 30)
+      21: Decrease STOCH_K_PERIOD by 1 (min 5)
+      22: Increase STOCH_D_PERIOD by 1 (max 10)
+      23: Decrease STOCH_D_PERIOD by 1 (min 1)
+      24: Increase BOLLINGER_PERIOD by 1 (max 50)
+      25: Decrease BOLLINGER_PERIOD by 1 (min 10)
+      26: Increase BOLLINGER_STD_DEV by 0.1 (max 5)
+      27: Decrease BOLLINGER_STD_DEV by 0.1 (min 1)
+      28: Increase OBV_SLOPE_PERIOD by 1 (max 20)
+      29: Decrease OBV_SLOPE_PERIOD by 1 (min 1)
+      30: Increase ADX_PERIOD by 1 (max 30)
+      31: Decrease ADX_PERIOD by 1 (min 5)
+      32: Increase ADX_THRESHOLD by 1 (max 35)
+      33: Decrease ADX_THRESHOLD by 1 (min 15)
+      34: Increase CCI_PERIOD by 1 (max 40)
+      35: Decrease CCI_PERIOD by 1 (min 10)
+      36: Increase CCI_OVERSOLD by 5 (cap at -50)
+      37: Decrease CCI_OVERSOLD by 5 (min -200)
+      38: Increase CCI_OVERBOUGHT by 5 (max 200)
+      39: Decrease CCI_OVERBOUGHT by 5 (min 50)
+      40: Increase RSI_PERIOD by 1 (max 30)
+      41: Decrease RSI_PERIOD by 1 (min 5)
+      42: Increase ORDER_AMOUNT by 100 (max 5000)
+      43: Decrease ORDER_AMOUNT by 100 (min 500)
+      44: Increase MACD_FAST by 1 (max 20)
+      45: Decrease MACD_FAST by 1 (min 5)
+      46: Increase MACD_SLOW by 1 (max 40)
+      47: Decrease MACD_SLOW by 1 (min 20)
+      48: Increase MACD_SIGNAL by 1 (max 20)
+      49: Decrease MACD_SIGNAL by 1 (min 5)
+      50: Increase SMA_PERIOD by 1 (max 100)
+      51: Decrease SMA_PERIOD by 1 (min 10)
+      52: Increase STOCH_OVERSOLD by 1 (max 50)
+      53: Decrease STOCH_OVERSOLD by 1 (min 10)
+      54: Increase STOCH_OVERBOUGHT by 1 (max 90)
+      55: Decrease STOCH_OVERBOUGHT by 1 (min 50)
+      Else: No change
     """
     with params_lock:
+        # Adjust RSI oversold/overbought thresholds
         if action == 0:
             strategy_params['RSI_OVERSOLD'] = min(40, strategy_params['RSI_OVERSOLD'] + 0.5)
             logging.debug("RL Action: Increased RSI_OVERSOLD")
@@ -639,6 +1002,8 @@ def apply_rl_action(action):
         elif action == 3:
             strategy_params['RSI_OVERBOUGHT'] = max(60, strategy_params['RSI_OVERBOUGHT'] - 0.5)
             logging.debug("RL Action: Decreased RSI_OVERBOUGHT")
+        
+        # Adjust indicator weights
         elif action == 4:
             strategy_params['RSI_WEIGHT'] += 0.01
             logging.debug("RL Action: Increased RSI_WEIGHT")
@@ -658,13 +1023,172 @@ def apply_rl_action(action):
             strategy_params['SMA_WEIGHT'] = max(0.1, strategy_params['SMA_WEIGHT'] - 0.01)
             logging.debug("RL Action: Decreased SMA_WEIGHT")
         elif action == 10:
-            logging.debug("RL Action: No change")
-        # Re-normalize weights so that they sum to 1.
-        total = strategy_params['RSI_WEIGHT'] + strategy_params['MACD_WEIGHT'] + strategy_params['SMA_WEIGHT']
-        strategy_params['RSI_WEIGHT'] /= total
-        strategy_params['MACD_WEIGHT'] /= total
-        strategy_params['SMA_WEIGHT'] /= total
+            strategy_params['STOCH_WEIGHT'] += 0.01
+            logging.debug("RL Action: Increased STOCH_WEIGHT")
+        elif action == 11:
+            strategy_params['STOCH_WEIGHT'] = max(0.1, strategy_params['STOCH_WEIGHT'] - 0.01)
+            logging.debug("RL Action: Decreased STOCH_WEIGHT")
+        elif action == 12:
+            strategy_params['BOLLINGER_WEIGHT'] += 0.01
+            logging.debug("RL Action: Increased BOLLINGER_WEIGHT")
+        elif action == 13:
+            strategy_params['BOLLINGER_WEIGHT'] = max(0.1, strategy_params['BOLLINGER_WEIGHT'] - 0.01)
+            logging.debug("RL Action: Decreased BOLLINGER_WEIGHT")
+        elif action == 14:
+            strategy_params['OBV_WEIGHT'] += 0.01
+            logging.debug("RL Action: Increased OBV_WEIGHT")
+        elif action == 15:
+            strategy_params['OBV_WEIGHT'] = max(0.1, strategy_params['OBV_WEIGHT'] - 0.01)
+            logging.debug("RL Action: Decreased OBV_WEIGHT")
+        elif action == 16:
+            strategy_params['ADX_WEIGHT'] += 0.01
+            logging.debug("RL Action: Increased ADX_WEIGHT")
+        elif action == 17:
+            strategy_params['ADX_WEIGHT'] = max(0.1, strategy_params['ADX_WEIGHT'] - 0.01)
+            logging.debug("RL Action: Decreased ADX_WEIGHT")
+        elif action == 18:
+            strategy_params['CCI_WEIGHT'] += 0.01
+            logging.debug("RL Action: Increased CCI_WEIGHT")
+        elif action == 19:
+            strategy_params['CCI_WEIGHT'] = max(0.1, strategy_params['CCI_WEIGHT'] - 0.01)
+            logging.debug("RL Action: Decreased CCI_WEIGHT")
+        
+        # After weight adjustments, re-normalize the weights so they sum roughly to 1.
+        if action in {4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}:
+            total_weight = (
+                strategy_params['RSI_WEIGHT'] +
+                strategy_params['MACD_WEIGHT'] +
+                strategy_params['SMA_WEIGHT'] +
+                strategy_params['STOCH_WEIGHT'] +
+                strategy_params['BOLLINGER_WEIGHT'] +
+                strategy_params['OBV_WEIGHT'] +
+                strategy_params['ADX_WEIGHT'] +
+                strategy_params['CCI_WEIGHT']
+            )
+            strategy_params['RSI_WEIGHT'] /= total_weight
+            strategy_params['MACD_WEIGHT'] /= total_weight
+            strategy_params['SMA_WEIGHT'] /= total_weight
+            strategy_params['STOCH_WEIGHT'] /= total_weight
+            strategy_params['BOLLINGER_WEIGHT'] /= total_weight
+            strategy_params['OBV_WEIGHT'] /= total_weight
+            strategy_params['ADX_WEIGHT'] /= total_weight
+            strategy_params['CCI_WEIGHT'] /= total_weight
 
+        # Adjust other parameters using default_params as guidance:
+        elif action == 20:
+            strategy_params['STOCH_K_PERIOD'] = min(30, strategy_params['STOCH_K_PERIOD'] + 1)
+            logging.debug("RL Action: Increased STOCH_K_PERIOD")
+        elif action == 21:
+            strategy_params['STOCH_K_PERIOD'] = max(5, strategy_params['STOCH_K_PERIOD'] - 1)
+            logging.debug("RL Action: Decreased STOCH_K_PERIOD")
+        elif action == 22:
+            strategy_params['STOCH_D_PERIOD'] = min(10, strategy_params['STOCH_D_PERIOD'] + 1)
+            logging.debug("RL Action: Increased STOCH_D_PERIOD")
+        elif action == 23:
+            strategy_params['STOCH_D_PERIOD'] = max(1, strategy_params['STOCH_D_PERIOD'] - 1)
+            logging.debug("RL Action: Decreased STOCH_D_PERIOD")
+        elif action == 24:
+            strategy_params['BOLLINGER_PERIOD'] = min(50, strategy_params['BOLLINGER_PERIOD'] + 1)
+            logging.debug("RL Action: Increased BOLLINGER_PERIOD")
+        elif action == 25:
+            strategy_params['BOLLINGER_PERIOD'] = max(10, strategy_params['BOLLINGER_PERIOD'] - 1)
+            logging.debug("RL Action: Decreased BOLLINGER_PERIOD")
+        elif action == 26:
+            # Increase by 0.1, rounded to 1 decimal place
+            strategy_params['BOLLINGER_STD_DEV'] = min(5, round(strategy_params['BOLLINGER_STD_DEV'] + 0.1, 1))
+            logging.debug("RL Action: Increased BOLLINGER_STD_DEV")
+        elif action == 27:
+            strategy_params['BOLLINGER_STD_DEV'] = max(1, round(strategy_params['BOLLINGER_STD_DEV'] - 0.1, 1))
+            logging.debug("RL Action: Decreased BOLLINGER_STD_DEV")
+        elif action == 28:
+            strategy_params['OBV_SLOPE_PERIOD'] = min(20, strategy_params['OBV_SLOPE_PERIOD'] + 1)
+            logging.debug("RL Action: Increased OBV_SLOPE_PERIOD")
+        elif action == 29:
+            strategy_params['OBV_SLOPE_PERIOD'] = max(1, strategy_params['OBV_SLOPE_PERIOD'] - 1)
+            logging.debug("RL Action: Decreased OBV_SLOPE_PERIOD")
+        elif action == 30:
+            strategy_params['ADX_PERIOD'] = min(30, strategy_params['ADX_PERIOD'] + 1)
+            logging.debug("RL Action: Increased ADX_PERIOD")
+        elif action == 31:
+            strategy_params['ADX_PERIOD'] = max(5, strategy_params['ADX_PERIOD'] - 1)
+            logging.debug("RL Action: Decreased ADX_PERIOD")
+        elif action == 32:
+            strategy_params['ADX_THRESHOLD'] = min(35, strategy_params['ADX_THRESHOLD'] + 1)
+            logging.debug("RL Action: Increased ADX_THRESHOLD")
+        elif action == 33:
+            strategy_params['ADX_THRESHOLD'] = max(15, strategy_params['ADX_THRESHOLD'] - 1)
+            logging.debug("RL Action: Decreased ADX_THRESHOLD")
+        elif action == 34:
+            strategy_params['CCI_PERIOD'] = min(40, strategy_params['CCI_PERIOD'] + 1)
+            logging.debug("RL Action: Increased CCI_PERIOD")
+        elif action == 35:
+            strategy_params['CCI_PERIOD'] = max(10, strategy_params['CCI_PERIOD'] - 1)
+            logging.debug("RL Action: Decreased CCI_PERIOD")
+        elif action == 36:
+            # For CCI_OVERSOLD, “increasing” makes the value less negative but cap at -50
+            strategy_params['CCI_OVERSOLD'] = min(strategy_params['CCI_OVERSOLD'] + 5, -50)
+            logging.debug("RL Action: Increased CCI_OVERSOLD")
+        elif action == 37:
+            strategy_params['CCI_OVERSOLD'] = max(strategy_params['CCI_OVERSOLD'] - 5, -200)
+            logging.debug("RL Action: Decreased CCI_OVERSOLD")
+        elif action == 38:
+            strategy_params['CCI_OVERBOUGHT'] = min(strategy_params['CCI_OVERBOUGHT'] + 5, 200)
+            logging.debug("RL Action: Increased CCI_OVERBOUGHT")
+        elif action == 39:
+            strategy_params['CCI_OVERBOUGHT'] = max(strategy_params['CCI_OVERBOUGHT'] - 5, 50)
+            logging.debug("RL Action: Decreased CCI_OVERBOUGHT")
+        elif action == 40:
+            strategy_params['RSI_PERIOD'] = min(30, strategy_params['RSI_PERIOD'] + 1)
+            logging.debug("RL Action: Increased RSI_PERIOD")
+        elif action == 41:
+            strategy_params['RSI_PERIOD'] = max(5, strategy_params['RSI_PERIOD'] - 1)
+            logging.debug("RL Action: Decreased RSI_PERIOD")
+        elif action == 42:
+            strategy_params['ORDER_AMOUNT'] = min(5000, strategy_params['ORDER_AMOUNT'] + 10)
+            logging.debug("RL Action: Increased ORDER_AMOUNT")
+        elif action == 43:
+            strategy_params['ORDER_AMOUNT'] = max(500, strategy_params['ORDER_AMOUNT'] - 10)
+            logging.debug("RL Action: Decreased ORDER_AMOUNT")
+        elif action == 44:
+            strategy_params['MACD_FAST'] = min(20, strategy_params['MACD_FAST'] + 1)
+            logging.debug("RL Action: Increased MACD_FAST")
+        elif action == 45:
+            strategy_params['MACD_FAST'] = max(5, strategy_params['MACD_FAST'] - 1)
+            logging.debug("RL Action: Decreased MACD_FAST")
+        elif action == 46:
+            strategy_params['MACD_SLOW'] = min(40, strategy_params['MACD_SLOW'] + 1)
+            logging.debug("RL Action: Increased MACD_SLOW")
+        elif action == 47:
+            strategy_params['MACD_SLOW'] = max(20, strategy_params['MACD_SLOW'] - 1)
+            logging.debug("RL Action: Decreased MACD_SLOW")
+        elif action == 48:
+            strategy_params['MACD_SIGNAL'] = min(20, strategy_params['MACD_SIGNAL'] + 1)
+            logging.debug("RL Action: Increased MACD_SIGNAL")
+        elif action == 49:
+            strategy_params['MACD_SIGNAL'] = max(5, strategy_params['MACD_SIGNAL'] - 1)
+            logging.debug("RL Action: Decreased MACD_SIGNAL")
+        elif action == 50:
+            strategy_params['SMA_PERIOD'] = min(100, strategy_params['SMA_PERIOD'] + 1)
+            logging.debug("RL Action: Increased SMA_PERIOD")
+        elif action == 51:
+            strategy_params['SMA_PERIOD'] = max(10, strategy_params['SMA_PERIOD'] - 1)
+            logging.debug("RL Action: Decreased SMA_PERIOD")
+        elif action == 52:
+            strategy_params['STOCH_OVERSOLD'] = min(50, strategy_params['STOCH_OVERSOLD'] + 1)
+            logging.debug("RL Action: Increased STOCH_OVERSOLD")
+        elif action == 53:
+            strategy_params['STOCH_OVERSOLD'] = max(10, strategy_params['STOCH_OVERSOLD'] - 1)
+            logging.debug("RL Action: Decreased STOCH_OVERSOLD")
+        elif action == 54:
+            strategy_params['STOCH_OVERBOUGHT'] = min(90, strategy_params['STOCH_OVERBOUGHT'] + 1)
+            logging.debug("RL Action: Increased STOCH_OVERBOUGHT")
+        elif action == 55:
+            strategy_params['STOCH_OVERBOUGHT'] = max(50, strategy_params['STOCH_OVERBOUGHT'] - 1)
+            logging.debug("RL Action: Decreased STOCH_OVERBOUGHT")
+        else:
+            logging.debug("RL Action: No change")
+
+rl_agent = ParameterTuningAgent()
 def tuning_loop():
     """
     RL-based tuning loop:
@@ -678,21 +1202,21 @@ def tuning_loop():
     global previous_cumulative_reward, previous_state
     previous_cumulative_reward = cumulative_reward
     previous_state = 0  # initial state: neutral
+    # Define path to persist RL Q-values.
+    rl_qtable_path = os.path.join(working_dir, "rl_qvalues.json")
     while True:
         try:
             time.sleep(TUNE_INTERVAL)
             with trade_log_lock:
                 current_reward = cumulative_reward
-            # Compute reward as the change in cumulative reward over the interval.
             reward = current_reward - previous_cumulative_reward
-            # Determine new state: 1 if positive reward, -1 if negative, 0 if no change.
             new_state = 1 if reward > 0 else (-1 if reward < 0 else 0)
-            # RL agent chooses an action based on the previous state.
             action = rl_agent.choose_action(previous_state)
             apply_rl_action(action)
             update_strategy_params(strategy_params)
-            # Update Q-values for the RL agent.
             rl_agent.update(previous_state, action, reward, new_state)
+            # New: Save the updated Q-table after each tuning step.
+            rl_agent.save_q_table(rl_qtable_path)
             logging.info("RL tuning: prev_state=%s, action=%s, reward=%.2f, new_state=%s", previous_state, action, reward, new_state)
             previous_state = new_state
             previous_cumulative_reward = current_reward
@@ -760,6 +1284,7 @@ def trading_loop():
     api = tradeapi.REST(API_KEY, API_SECRET, BASE_URL, api_version='v2')
     global last_discovery_date
     logging.info("Starting trading loop...")
+    scan_and_trade(api)  # Initial scan and trade
     
     while True:
         try:       
@@ -861,13 +1386,16 @@ def api_status():
 def main():
     api = tradeapi.REST(API_KEY, API_SECRET, BASE_URL, api_version='v2')
     update_held_positions(api)
+    # New: Load RL Q-table from file at startup.
+    rl_qtable_path = os.path.join(working_dir, "rl_qvalues.json")
+    rl_agent.load_q_table(rl_qtable_path)
     trading_thread = threading.Thread(target=trading_loop, daemon=True)
     tuning_thread = threading.Thread(target=tuning_loop, daemon=True)
     trading_thread.start()
     tuning_thread.start()
-    logging.info("Starting Flask dashboard on http://0.0.0.0:5000")
+    logging.info("Starting Flask dashboard on http://0.0.0.0:5001")
     # Disable Flask's auto-reloader to prevent duplicate threads in debug mode.
-    app.run(host='0.0.0.0', port=5000, debug=DEBUG, use_reloader=False)
+    app.run(host='0.0.0.0', port=5001, debug=DEBUG, use_reloader=False)
 
 if __name__ == '__main__':
     main()
