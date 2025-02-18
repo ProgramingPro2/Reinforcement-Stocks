@@ -1209,6 +1209,7 @@ def tuning_loop():
             time.sleep(TUNE_INTERVAL)
             with trade_log_lock:
                 current_reward = cumulative_reward
+                logging.debug("Current cumulative reward: {current_reward:.2f}")
             reward = current_reward - previous_cumulative_reward
             new_state = 1 if reward > 0 else (-1 if reward < 0 else 0)
             action = rl_agent.choose_action(previous_state)
