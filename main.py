@@ -118,8 +118,8 @@ default_params = {
     'BUY_THRESHOLD': 0.5,
     'SELL_THRESHOLD': -0.5,
     'WATCHLIST_SIZE': 100,
-    'CHECK_INTERVAL_MINUTES': 5,
-    'TUNE_INTERVAL_MINUTES': 10
+    'CHECK_INTERVAL_MINUTES': 10,
+    'TUNE_INTERVAL_MINUTES': 5
 }
 strategy_params = default_params.copy()
 params_lock = threading.Lock()  # Protect access to strategy_params
@@ -377,9 +377,10 @@ def record_portfolio_value(api: tradeapi.REST):
             try:
                 ticker = yf.Ticker(ticker_symbol)
                 hist = ticker.history(period="1d", interval="1m")
-                if not hist.empty and 'Close' in hist:
-                    return hist['Close'].iloc[-1]
-                return hist['Close'].iloc[-1] if not hist.empty else None
+                if hist.empty or 'Close' not in hist.columns:
+                    logging.error(f"No data available for {ticker_symbol}")
+                    return None
+                return hist['Close'].iloc[-1]
             except Exception as e:
                 logging.error(f"Error getting {ticker_symbol} data: {e}")
                 return None
@@ -869,7 +870,7 @@ previous_state = 0  # State can be -1, 0, or 1 representing performance trend.
 NUM_ACTIONS = 56  # Define number of discrete actions.
 
 class ParameterTuningAgent:
-    def __init__(self, alpha=0.2, gamma=0.9, epsilon=0.3):
+    def __init__(self, alpha=0.4, gamma=0.7, epsilon=0.5):
         self.alpha = alpha      # Learning rate
         self.gamma = gamma      # Discount factor
         self.epsilon = epsilon  # Exploration rate
