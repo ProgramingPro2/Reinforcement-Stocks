@@ -1273,12 +1273,15 @@ def trading_loop():
     global last_discovery_date
     logging.info("Starting trading loop...")
     scan_and_trade(api)  # Initial scan and trade
+    now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
     
     while True:
         try:       
             if is_market_open():
                 scan_and_trade(api)
                 record_portfolio_value(api)
+                if now_et.hour == 16 and now_et.minute >= 20 and now_et.minute < 30:
+                    liquidate_all_positions(api)
             else:
                 # Handle end-of-day discovery once per day
                 now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
