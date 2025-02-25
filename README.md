@@ -1,6 +1,6 @@
 # Reinforcement Trading Bot
 
-A fully featured trading bot that uses reinforcement learning–inspired parameter tuning, a Flask web dashboard, market-hour awareness, and end-of-day watchlist discovery. This bot uses [yfinance](https://github.com/ranaroussi/yfinance) to retrieve near real-time historical data and executes trades via [Alpaca's API](https://alpaca.markets/). It calculates a composite signal based on technical indicators (RSI, MACD, and SMA) to determine buy/sell decisions during US market hours and automatically adjusts its strategy parameters over time.
+A fully featured trading bot that uses reinforcement learning–inspired parameter tuning, a Flask web dashboard, market-hour awareness, and end-of-day watchlist discovery. This bot uses [yfinance](https://github.com/ranaroussi/yfinance) to retrieve near real-time historical data and executes trades via [Alpaca's API](https://alpaca.markets/). It calculates a composite signal based on technical indicators (RSI, MACD, SMA, etc.) to determine buy/sell decisions during US market hours and automatically adjusts its strategy parameters over time.
 
 ## Features
 
