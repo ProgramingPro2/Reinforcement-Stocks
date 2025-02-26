@@ -52,6 +52,25 @@ parser.add_argument('--debug', action='store_true', help='Enable debug logging')
 args, unknown = parser.parse_known_args()
 DEBUG = args.debug
 
+WELCOME_MESSAGE = """
+  _____                                                      _                   _____                   ___    _            
+ |  __ \                                                    (_)                 |  __ \                 |__ \  ( )           
+ | |__) |  _ __    ___     __ _   _ __    __ _   _ __ ___    _   _ __     __ _  | |__) |  _ __    ___      ) | |/   ___      
+ |  ___/  | '__|  / _ \   / _` | | '__|  / _` | | '_ ` _ \  | | | '_ \   / _` | |  ___/  | '__|  / _ \    / /      / __|     
+ | |      | |    | (_) | | (_| | | |    | (_| | | | | | | | | | | | | | | (_| | | |      | |    | (_) |  / /_      \__ \     
+ |_|      |_|     \___/   \__, | |_|     \__,_| |_| |_| |_| |_| |_| |_|  \__, | |_|      |_|     \___/  |____|     |___/     
+                           __/ |                                          __/ |                                              
+   _____   _              |___/ _        _______                      _  |___/                             _                 
+  / ____| | |                  | |      |__   __|                    | | (_)                       /\     | |                
+ | (___   | |_    ___     ___  | | __      | |     _ __    __ _    __| |  _   _ __     __ _       /  \    | |   __ _    ___  
+  \___ \  | __|  / _ \   / __| | |/ /      | |    | '__|  / _` |  / _` | | | | '_ \   / _` |     / /\ \   | |  / _` |  / _ \ 
+  ____) | | |_  | (_) | | (__  |   <       | |    | |    | (_| | | (_| | | | | | | | | (_| |    / ____ \  | | | (_| | | (_) |
+ |_____/   \__|  \___/   \___| |_|\_\      |_|    |_|     \__,_|  \__,_| |_| |_| |_|  \__, |   /_/    \_\ |_|  \__, |  \___/ 
+                                                                                       __/ |                    __/ |        
+                                                                                      |___/                    |___/         
+
+                        Please star on GitHub: https://github.com/ProgramingPro2/Reinforcement-Stocks
+"""
 
 if DEBUG:
     logging.basicConfig(
@@ -118,8 +137,8 @@ default_params = {
     'BUY_THRESHOLD': 0.5,
     'SELL_THRESHOLD': -0.5,
     'WATCHLIST_SIZE': 100,
-    'CHECK_INTERVAL_MINUTES': 10,
-    'TUNE_INTERVAL_MINUTES': 5
+    'CHECK_INTERVAL_MINUTES': 5,
+    'TUNE_INTERVAL_MINUTES': 10
 }
 strategy_params = default_params.copy()
 params_lock = threading.Lock()  # Protect access to strategy_params
@@ -825,6 +844,7 @@ def record_trade(symbol: str, side: str, qty: int, price: float):
                 trade_entry['pnl'] = pnl
                 cumulative_reward += pnl
                 del open_positions_rl[symbol]
+                logging.debug(f"Updated cumulative reward: {cumulative_reward}")
             else:
                 trade_entry['pnl'] = 0.0
         trade_log.append(trade_entry)
@@ -1194,9 +1214,9 @@ def tuning_loop():
             time.sleep(TUNE_INTERVAL)
             with trade_log_lock:
                 current_reward = cumulative_reward
-                logging.debug("Current cumulative reward: {current_reward:.2f}")
+                logging.debug(f"Current cumulative reward: {current_reward:.2f}")
             # Compute reward as the change in cumulative reward over the interval.
-            reward = current_reward - previous_cumulative_reward
+            reward = (current_reward - previous_cumulative_reward)*3
             # Determine new state: 1 if positive reward, -1 if negative, 0 if no change.
             new_state = 1 if reward > 0 else (-1 if reward < 0 else 0)
             # RL agent chooses an action based on the previous state.
@@ -1274,13 +1294,14 @@ def trading_loop():
     logging.info("Starting trading loop...")
     scan_and_trade(api)  # Initial scan and trade
     now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
-    
+
     while True:
-        try:       
+        try:
             if is_market_open():
                 scan_and_trade(api)
                 record_portfolio_value(api)
-                if now_et.hour == 16 and now_et.minute >= 20 and now_et.minute < 30:
+                if now_et.hour == 15 and now_et.minute >= 40 and now_et.minute < 59:
+                    logging.info("Market is closing soon. Liquidating all positions.")
                     liquidate_all_positions(api)
             else:
                 # Handle end-of-day discovery once per day
@@ -1381,6 +1402,7 @@ def main():
     tuning_thread = threading.Thread(target=tuning_loop, daemon=True)
     trading_thread.start()
     tuning_thread.start()
+    logging.info(WELCOME_MESSAGE)
     logging.info("Starting Flask dashboard on http://0.0.0.0:5000")
     # Disable Flask's auto-reloader to prevent duplicate threads in debug mode.
     app.run(host='0.0.0.0', port=5000, debug=DEBUG, use_reloader=False)
