@@ -477,7 +477,7 @@ def liquidate_all_positions(api: tradeapi.REST):
         logging.error(f"Liquidation failed: {e}")
 
 def calculate_order_quantity(price: float, order_amount: float) -> int:
-    qty = max(0.01, round(float(order_amount / price), 2))
+    qty = max(1, round(float(order_amount / price), 2))
     logging.debug(f"Calculated order quantity: {qty} shares at price {price} for order amount {order_amount}")
     return qty
 
@@ -1300,7 +1300,9 @@ def trading_loop():
             if is_market_open():
                 scan_and_trade(api)
                 record_portfolio_value(api)
-                if now_et.hour == 15 and now_et.minute >= 40 and now_et.minute < 59:
+                liquidation_start_time = now_et.replace(hour=15, minute=50, second=0, microsecond=0)
+                liquidation_end_time = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+                if now_et >= liquidation_start_time and now_et < liquidation_end_time:
                     logging.info("Market is closing soon. Liquidating all positions.")
                     liquidate_all_positions(api)
             else:
