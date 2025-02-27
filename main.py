@@ -795,9 +795,9 @@ def scan_and_trade(api: tradeapi.REST):
             if position is not None:
                 decision = 'sell'
                 logging.info(f"{symbol}: Composite signal {composite_signal:.2f} < SELL_THRESHOLD {sell_threshold} => SELL")
-                order = submit_order(api, symbol, int(float(position.qty)), side='sell')
+                order = submit_order(api, symbol, float(position.qty), side='sell')
                 if order:
-                    record_trade(symbol, 'sell', int(float(position.qty)), current_price)
+                    record_trade(symbol, 'sell', float(position.qty), current_price)
             else:
                 decision = 'hold (no position)'
                 logging.debug(f"{symbol}: Bearish composite signal but no position held.")
