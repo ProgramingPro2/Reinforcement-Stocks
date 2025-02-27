@@ -138,7 +138,8 @@ default_params = {
     'SELL_THRESHOLD': -0.5,
     'WATCHLIST_SIZE': 100,
     'CHECK_INTERVAL_MINUTES': 5,
-    'TUNE_INTERVAL_MINUTES': 10
+    'TUNE_INTERVAL_MINUTES': 10,
+    'EMERGENCY_LOSS_THRESHOLD': 0.02
 }
 strategy_params = default_params.copy()
 params_lock = threading.Lock()  # Protect access to strategy_params
@@ -801,6 +802,19 @@ def scan_and_trade(api: tradeapi.REST):
             else:
                 decision = 'hold (no position)'
                 logging.debug(f"{symbol}: Bearish composite signal but no position held.")
+        elif position is not None and symbol in open_positions_rl:
+            emergency_loss_threshold = strategy_params.get('EMERGENCY_LOSS_THRESHOLD', 0.02)
+            purchase_price = open_positions_rl[symbol][0]
+            threshold_price = purchase_price * (1 - emergency_loss_threshold)
+            if current_price < threshold_price:
+                decision = 'sell (emergency)'
+                logging.info(f"{symbol}: Emergency sell triggered: current price {current_price:.2f} below threshold {threshold_price:.2f} (purchase price {purchase_price:.2f})")
+                order = submit_order(api, symbol, float(position.qty), side='sell')
+                if order:
+                    record_trade(symbol, 'sell', float(position.qty), current_price)
+            else:
+                decision = 'neutral'
+                logging.debug(f"{symbol}: No emergency sell triggered; current price {current_price:.2f} stays above threshold {threshold_price:.2f}")
         else:
             decision = 'neutral'
             logging.debug(f"{symbol}: Composite signal in neutral zone.")
