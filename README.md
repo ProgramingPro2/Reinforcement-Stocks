@@ -72,6 +72,11 @@ Create a stocks.json file in the working directory containing a list of stock ti
    ```json
     ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
    ```
+to automatically verify your file run:
+
+```shell
+python stocks_file_verifier.py
+```
 
 ## Usage
 
