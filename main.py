@@ -477,7 +477,7 @@ def liquidate_all_positions(api: tradeapi.REST):
         logging.error(f"Liquidation failed: {e}")
 
 def calculate_order_quantity(price: float, order_amount: float) -> int:
-    qty = max(1, round(float(order_amount / price), 2))
+    qty = max(1, round(float(order_amount / price), 0))
     logging.debug(f"Calculated order quantity: {qty} shares at price {price} for order amount {order_amount}")
     return qty
 
