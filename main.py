@@ -1313,6 +1313,9 @@ def trading_loop():
 
     while True:
         try:
+            now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
+            liquidation_start_time = now_et.replace(hour=15, minute=50, second=0)
+            liquidation_end_time = now_et.replace(hour=16, minute=0, second=0)
             if is_market_open() and now_et <= liquidation_start_time:
                 scan_and_trade(api)
                 record_portfolio_value(api)
