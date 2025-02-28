@@ -1,6 +1,8 @@
 # Ignore environment files
 .env
 
+backtesting.py
+
 # Ignore all JSON files
 *.json
 

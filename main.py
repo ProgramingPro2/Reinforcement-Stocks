@@ -107,7 +107,7 @@ default_params = {
     'RSI_PERIOD': 14,
     'RSI_OVERSOLD': 30,
     'RSI_OVERBOUGHT': 70,
-    'ORDER_AMOUNT': 1000,  # Dollar amount per trade.
+    'ORDER_AMOUNT': 30000,  # Dollar amount per trade.
     'MACD_FAST': 12,
     'MACD_SLOW': 26,
     'MACD_SIGNAL': 9,
@@ -134,8 +134,8 @@ default_params = {
     'ADX_WEIGHT': 0.125,
     'CCI_WEIGHT': 0.125,
     # Composite signal decision thresholds:
-    'BUY_THRESHOLD': 0.5,
-    'SELL_THRESHOLD': -0.5,
+    'BUY_THRESHOLD': 0.3,
+    'SELL_THRESHOLD': -0.3,
     'WATCHLIST_SIZE': 100,
     'CHECK_INTERVAL_MINUTES': 5,
     'TUNE_INTERVAL_MINUTES': 10,
@@ -847,13 +847,18 @@ def record_trade(symbol: str, side: str, qty: int, price: float):
             'side': side,
             'qty': qty,
             'price': price,
+            'buy_price': 0.0,
+            'buy_qty': 0,
             'pnl': 0.0
         }
         if side == 'buy':
             open_positions_rl[symbol] = (price, qty)
+            trade_entry['buy_price'] = price
         elif side == 'sell':
             if symbol in open_positions_rl:
                 buy_price, buy_qty = open_positions_rl[symbol]
+                buy_price = trade_entry['buy_price']
+                buy_qty = trade_entry['buy_qty']
                 pnl = (price - buy_price) * qty
                 trade_entry['pnl'] = pnl
                 cumulative_reward += pnl
