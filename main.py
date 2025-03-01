@@ -471,8 +471,9 @@ def liquidate_all_positions(api: tradeapi.REST):
         positions = api.list_positions()
         i = 0
         for pos in positions:
-            submit_order(api, pos.symbol, pos.qty, 'sell')
-            record_trade(pos.symbol, pos.qty, 'sell')
+            order = submit_order(api, pos.symbol, pos.qty, 'sell')
+            if order:
+                record_trade(pos.symbol, pos.qty, 'sell')
             i += 1
         logging.info(f"End of the day liquidated: {i} positions")
     except Exception as e:
