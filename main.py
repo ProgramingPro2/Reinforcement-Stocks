@@ -252,6 +252,24 @@ def save_data():
         json.dump(data, f, indent=4)
     logging.debug("Data saved to data.json.")
 
+Q_VALUES_FILE = os.path.join(working_dir, "rl_qvalues.json")
+def load_q_values():
+    if os.path.exists(Q_VALUES_FILE):
+        with open(Q_VALUES_FILE, "r") as f:
+            try:
+                q_values = json.load(f)
+                return q_values
+            except json.JSONDecodeError:
+                logging.error(f"Error loading JSON {Q_VALUES_FILE}, initializing default Q-values.")
+    else:
+        logging.error(f"Error loading JSON {Q_VALUES_FILE}, initializing default Q-values.")
+    return {}
+
+def save_q_values(q_values):
+    with open(Q_VALUES_FILE, "w") as f:
+        json.dump(q_values, f, indent=4)
+    logging.debug("Q-values saved to q_values.json.")
+
 def update_strategy_params(new_params):
     with params_lock:
         strategy_params.update(new_params)
@@ -915,7 +933,7 @@ class ParameterTuningAgent:
         self.alpha = alpha      # Learning rate
         self.gamma = gamma      # Discount factor
         self.epsilon = epsilon  # Exploration rate
-        self.q_table = {}       # Q-table mapping state -> list of Q-values for each action
+        self.q_table = load_q_values()    # Q-table mapping state -> list of Q-values for each action
 
     def get_q_values(self, state):
         if state not in self.q_table:
@@ -942,6 +960,7 @@ class ParameterTuningAgent:
         td_target = reward + self.gamma * best_next
         td_error = td_target - q_values[action]
         q_values[action] += self.alpha * td_error
+        save_q_values(self.q_table)
         logging.debug(f"RL Agent: Updated Q-value for state {state}, action {action}: {q_values[action]:.4f} (TD error: {td_error:.4f})")
 
 # Instantiate the RL agent.
