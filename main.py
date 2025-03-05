@@ -257,18 +257,21 @@ def load_q_values():
     if os.path.exists(Q_VALUES_FILE):
         with open(Q_VALUES_FILE, "r") as f:
             try:
-                q_values = json.load(f)
+                raw_q_values = json.load(f)
+                # Convert keys from strings to integers.
+                q_values = {int(k): v for k, v in raw_q_values.items()}
                 return q_values
             except json.JSONDecodeError:
-                logging.error(f"Error loading JSON {Q_VALUES_FILE}, initializing default Q-values.")
+                logging.error(f"Error loading JSON from {Q_VALUES_FILE}, initializing default Q-values.")
     else:
-        logging.error(f"Error loading JSON {Q_VALUES_FILE}, initializing default Q-values.")
+        logging.error(f"JSON file {Q_VALUES_FILE} not found, initializing default Q-values.")
     return {}
 
 def save_q_values(q_values):
+    # When saving, json.dump will automatically convert integer keys to strings.
     with open(Q_VALUES_FILE, "w") as f:
         json.dump(q_values, f, indent=4)
-    logging.debug("Q-values saved to q_values.json.")
+    logging.debug("Q-values saved to rl_qvalues.json.")
 
 def update_strategy_params(new_params):
     with params_lock:
@@ -1252,7 +1255,6 @@ def tuning_loop():
     previous_state = 0  # initial state: neutral
     while True:
         try:
-            time.sleep(TUNE_INTERVAL)
             with trade_log_lock:
                 current_reward = cumulative_reward
                 logging.debug(f"Current cumulative reward: {current_reward:.2f}")
@@ -1261,7 +1263,7 @@ def tuning_loop():
             # Determine new state: 1 if positive reward, -1 if negative, 0 if no change.
             new_state = 1 if reward > 0 else (-1 if reward < 0 else 0)
             # RL agent chooses an action based on the previous state.
-            action = rl_agent.choose_action([previous_state])
+            action = rl_agent.choose_action(previous_state)
             apply_rl_action(action)
             update_strategy_params(strategy_params)
             # Update Q-values for the RL agent.
@@ -1269,6 +1271,7 @@ def tuning_loop():
             logging.info("RL tuning: prev_state=%s, action=%s, reward=%.2f, new_state=%s", previous_state, action, reward, new_state)
             previous_state = new_state
             previous_cumulative_reward = current_reward
+            time.sleep(TUNE_INTERVAL)
         except Exception as e:
             logging.error("Error in tuning loop: %s", e)
 
