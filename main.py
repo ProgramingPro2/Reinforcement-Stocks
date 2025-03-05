@@ -491,7 +491,8 @@ def liquidate_all_positions(api: tradeapi.REST):
         for pos in positions:
             order = submit_order(api, pos.symbol, pos.qty, 'sell')
             if order:
-                record_trade(pos.symbol, pos.qty, 'sell')
+                price_per_share = float(pos.market_value) / float(pos.qty)
+                record_trade(pos.symbol, pos.qty, 'sell', price_per_share)
             i += 1
         logging.info(f"End of the day liquidated: {i} positions")
     except Exception as e:
@@ -1260,7 +1261,7 @@ def tuning_loop():
             # Determine new state: 1 if positive reward, -1 if negative, 0 if no change.
             new_state = 1 if reward > 0 else (-1 if reward < 0 else 0)
             # RL agent chooses an action based on the previous state.
-            action = rl_agent.choose_action(previous_state)
+            action = rl_agent.choose_action([previous_state])
             apply_rl_action(action)
             update_strategy_params(strategy_params)
             # Update Q-values for the RL agent.
