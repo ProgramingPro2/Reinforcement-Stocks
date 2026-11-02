@@ -102,3 +102,8 @@ This project is for educational purposes only. Trading involves risk, and you sh
 ## Contributing
 
 Contributions, issues, and feature requests are welcome! Please check the issues page for open problems or to suggest enhancements.
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
